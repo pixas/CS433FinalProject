@@ -1,0 +1,1 @@
+nvcc test.cu conv/conv.cu conv/gemm.cu conv/im2col.cu conv/mat_vec_add.cu -o test -I../include -arch=sm_70
