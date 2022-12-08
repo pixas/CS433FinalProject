@@ -33,26 +33,26 @@ float im[3 * 3 * 4 * 4] = {
 float bias_o[3] = { 1, 2, 3 };
 
 int main() {
-    half *kernels = new half[3 * 27];
-    half *im_h = new half[3 * 3 * 4 * 4];
+    float *kernels = new float[3 * 27];
+    float *im_h = new float[3 * 3 * 4 * 4];
     
     for (int i = 0; i < 3 * 27; i++) {
-        kernels[i] = __float2half(kernels_o[i]);
+        kernels[i] = (kernels_o[i]);
     }
     for (int i = 0; i < 3 * 3 * 4 * 4; i++) {
-        im_h[i] = __float2half(im[i]);
+        im_h[i] = (im[i]);
     }
 
-    half *d_kernels, *d_im;
+    float *d_kernels, *d_im;
     float *d_bias;
     float *d_out;
-    cudaMalloc(&d_kernels, 3 * 27 * sizeof(half));
-    cudaMalloc(&d_im, 3 * 3 * 4 * 4 * sizeof(half));
+    cudaMalloc(&d_kernels, 3 * 27 * sizeof(float));
+    cudaMalloc(&d_im, 3 * 3 * 4 * 4 * sizeof(float));
     cudaMalloc(&d_bias, 3 * sizeof(float));
     cudaMalloc(&d_out, 3 * 3 * 2 * 2 * sizeof(float));
 
-    cudaMemcpy(d_kernels, kernels, 3 * 27 * sizeof(half), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_im, im_h, 3 * 3 * 4 * 4 * sizeof(half), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_kernels, kernels, 3 * 27 * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_im, im_h, 3 * 3 * 4 * 4 * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_bias, bias_o, 3 * sizeof(float), cudaMemcpyHostToDevice);
 
     conv(

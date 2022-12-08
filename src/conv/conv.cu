@@ -1,6 +1,7 @@
 #include "im2col.hpp"
 #include "gemm.hpp"
 #include "mat_vec_add.hpp"
+#include "float_half_trans.hpp"
 #include "conv.hpp"
 
 /**
@@ -25,10 +26,10 @@
  * @return None.
  */
 void conv(
-    half *data_input,
+    float *data_input,
     const int batch_size, const int channels, 
     const int height, const int width,
-    half *data_kernel,
+    float *data_kernel,
     const int num_kernels, const int kernel_h, const int kernel_w,
     const int pad_h, const int pad_w,
     const int stride_h, const int stride_w,
@@ -42,13 +43,21 @@ void conv(
     const int output_h = (height + 2 * pad_h - eq_kernel_h) / stride_h + 1; // output height (without consideration of channel)
     const int output_w = (width + 2 * pad_w - eq_kernel_w) / stride_w + 1;  // output weight (without consideration of channel)
 
+    /* float2half begin */
+    half *data_input_half, *data_kernel_half;
+    cudaMalloc((void**)&data_input_half, batch_size * channels * height * width * sizeof(half));
+    cudaMalloc((void**)&data_kernel_half, channels * kernel_h * kernel_w * num_kernels * sizeof(half));
+    float2half(data_input, data_input_half, batch_size * channels * height * width);
+    float2half(data_kernel, data_kernel_half, channels * kernel_h * kernel_w * num_kernels);
+    /* float2half end */
+
     /* im2col begin */
     const int col_size = batch_size * channels * kernel_h * kernel_w * output_h * output_w; // size of columns
     half *data_col;
     cudaMalloc((void **)&data_col, sizeof(half) * col_size);
 
     im2col_gpu(
-        data_input,
+        data_input_half,
         batch_size, channels, 
         height, width,
         kernel_h, kernel_w,
@@ -63,7 +72,7 @@ void conv(
     float *tmp_mult_res;
     cudaMalloc((void **)&tmp_mult_res, sizeof(float) * batch_size * num_kernels * output_h * output_w);
     wmma_rbmm(
-        data_kernel, data_col, tmp_mult_res,
+        data_kernel_half, data_col, tmp_mult_res,
         batch_size, num_kernels, channels * kernel_h * kernel_w, output_h * output_w
     );
     /* matrix multiplication end */
@@ -77,4 +86,6 @@ void conv(
 
     cudaFree(tmp_mult_res);
     cudaFree(data_col);
+    cudaFree(data_input_half);
+    cudaFree(data_kernel_half);
 }
