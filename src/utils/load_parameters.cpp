@@ -73,8 +73,19 @@ class DataLoader {
 
 cv::dnn::Net load_model(const char* model_name) {
     const cv::String read_file_name = (cv::String)model_name;
-    cv::dnn::Net net = cv::dnn::readNetFromTorch(read_file_name);
+    try
+    {
+        /* code */cv::dnn::Net net = cv::dnn::readNetFromTorch(read_file_name);
+        return net;
+    }
+    catch(const std::exception& e)
+    {
+        std::cerr << e.what() << '\n';
+    }
+    
+    cv::dnn::Net net = cv::dnn::readNetFromONNX("resnet18.proto");
     return net;
+
 }
 
 std::unordered_map<String, std::unordered_map<String, cv::Mat>> obtain_layer_info(const dnn::Net& net) {
@@ -110,9 +121,7 @@ std::unordered_map<String, std::unordered_map<String, cv::Mat>> obtain_layer_inf
     return obtain_layer_info(net);
 }
 
-std::vector<cv::Mat> load_image(int batch_size, cv::String file_dir="") {
 
-}
 
 
 int main(int argc, char const *argv[])
