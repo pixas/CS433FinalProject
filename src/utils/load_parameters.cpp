@@ -50,9 +50,7 @@ class DataLoader {
                     break ;
                 }
             }
-            int height, width;
-            height = batched_images[0].size[1];
-            width = batched_images[0].size[0];
+
             std::vector<cv::Mat> output_images;
             output_images.assign(batched_images.begin(), batched_images.begin() + i);
             int cur_batch_size = output_images.size();
@@ -75,7 +73,7 @@ class DataLoader {
 
 cv::dnn::Net load_model(const char* model_name) {
     const cv::String read_file_name = (cv::String)model_name;
-    cv::dnn::Net net = cv::dnn::readNetFromONNX(read_file_name);
+    cv::dnn::Net net = cv::dnn::readNetFromTorch(read_file_name);
     return net;
 }
 
@@ -119,7 +117,7 @@ std::vector<cv::Mat> load_image(int batch_size, cv::String file_dir="") {
 
 int main(int argc, char const *argv[])
 {
-    auto net = load_model("./resnet18.proto");
+    auto net = load_model("/home/group14/CS433FinalProject/resnet18.t7");
     auto params = obtain_layer_info(net);
     for (auto idx = params.begin(); idx != params.end(); ++idx) {
         printf("%s\n", idx->first.c_str());
