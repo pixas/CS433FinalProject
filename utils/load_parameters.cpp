@@ -2,10 +2,78 @@
 #include <opencv2/opencv.hpp>
 #include <opencv2/dnn.hpp>
 #include <iostream>
-
+#include <vector>
+#include <fstream>
 using namespace cv;
 
-cv::dnn::Net load_model(const char* model_name){
+
+
+class DataLoader {
+    private:
+        int bsz;
+        int n_workers;
+        const int max_file = 10000;
+        int file_ptr = 0;
+        std::vector<std::string> file_list;
+    public:
+        DataLoader(int batch_size=1, int num_workers=1) {
+            bsz = batch_size;
+            n_workers = num_workers;
+            file_list.reserve(max_file);
+            std::fstream f_cin;
+            f_cin.open("../select_file_list.txt", std::ios::out | std::ios::in);
+            for (int i = 0; i < max_file; ++i) {
+                std::getline(f_cin, file_list[i]);
+                int cur_size = file_list[i].size();
+                file_list[i].substr(1, cur_size - 3);
+            }
+
+
+            f_cin.close();
+        }
+
+        ~DataLoader() {
+
+        }
+        void load_batch_data(float * input_batch_images) {
+            std::vector<cv::Mat> batched_images(bsz);
+            int i;
+            int height, width;
+            for (i = 0; i < bsz; ++i) {
+                auto temp = cv::imread(file_list[file_ptr]);
+                height = temp.size[1];
+                width = temp.size[0];
+                cv::cvtColor(temp, batched_images[i], cv::COLOR_BGR2RGB);
+
+                file_ptr += 1;
+                if (file_ptr == max_file) {
+                    break ;
+                }
+            }
+            int height, width;
+            height = batched_images[0].size[1];
+            width = batched_images[0].size[0];
+            std::vector<cv::Mat> output_images;
+            output_images.assign(batched_images.begin(), batched_images.begin() + i);
+            int cur_batch_size = output_images.size();
+            input_batch_images = new float[cur_batch_size * 3 * height * width];
+            for (int b = 0; b < cur_batch_size; ++b) {
+                for (int i = 0; i < height; ++i) {
+                    for (int j = 0; j < width; ++j) {
+                        for (int k = 0; k < 3; ++k) {
+                            input_batch_images[b * 3 * height * width + k * height * width + i * width + j] = (float)output_images[b].at<cv::Vec3b>(i, j)[k];
+                        }
+                    }
+                }
+            }
+            return;
+        }
+};
+
+
+
+
+cv::dnn::Net load_model(const char* model_name) {
     const cv::String read_file_name = (cv::String)model_name;
     cv::dnn::Net net = cv::dnn::readNetFromONNX(read_file_name);
     return net;
@@ -43,6 +111,11 @@ std::unordered_map<String, std::unordered_map<String, cv::Mat>> obtain_layer_inf
     auto net = load_model(file_name);
     return obtain_layer_info(net);
 }
+
+std::vector<cv::Mat> load_image(int batch_size, cv::String file_dir="") {
+
+}
+
 
 int main(int argc, char const *argv[])
 {
