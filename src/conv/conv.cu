@@ -11,7 +11,7 @@
  * @param channels      input img channels = kernel channels
  * @param height        input img height
  * @param width         input img width
- * @param data_kernel   kernel data, allocated on GPU, shape (channels, kernel_h, kernel_w)
+ * @param data_kernel   kernel data, allocated on GPU, shape (output_channel, input_channels, kernel_h, kernel_w)
  * @param num_kernels   number of kernels
  * @param kernel_h      kernel height
  * @param kernel_w      kernel width
