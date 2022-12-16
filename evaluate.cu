@@ -285,7 +285,7 @@ class ResNet18{
             output_project = new Linear(batch_size, 512, num_classes);
         }
 
-        void forward(float * input, float * output, int height, int width) {
+        void forward(float * input, float * output, int height, int width, float * debug) {
             float ** out_list = new float*[11];
 
             for (int i = 0; i < 10; ++i) {
@@ -300,23 +300,23 @@ class ResNet18{
                     out_list[i+1], out_list[i+2],
                     height_list[i+1], width_list[i+1]
                 );
-                
             }
-            adaptive_mean_pool(out_list[9], out_list[10], bsz, out_channels[9], height_list[9], width_list[9]);
-            // {
-            //     cudaMemcpy(debug, output, sizeof(float) * bsz * out_channels[9] * 1, cudaMemcpyDeviceToHost);
-            //     // for (int i = 0; i < height_list[9]; ++i) {
-            //     //     for (int j = 0; j < width_list[9]; ++j) {
-            //     //         printf("%.3f%s", debug[0 + 0 + i * width_list[9] + j], (j == width_list[9] - 1 ? "\n": " "));
-            //     //     }
-            //     // }
-            //     for (int i = 0; i < out_channels[9]; ++i) {
-            //         printf("%.3f%s", debug[i], (i == out_channels[9] - 1? "\n" : " "));
-            //     }
+            cudaMemcpy(debug, out_list[9], sizeof(float) * bsz * out_channels[9] * height_list[9] * width_list[9], cudaMemcpyDeviceToHost);
+            for (int b = 0; b < bsz; ++b) {
 
-            // }
+                for (int i = 0; i < height_list[9]; ++i) {
+                    for (int j = 0; j < width_list[9]; ++j) {
+                        printf("%.3f%s", debug[b * out_channels[9] * height_list[9] * width_list[9] + i * width_list[9] + j], (j == width_list[9] - 1 ? "\n": " "));
+                    }
+                }
+                printf("\n");
+            }
+            
+            // for (int i = )
+            adaptive_mean_pool(out_list[9], out_list[10], bsz, out_channels[9], height_list[9], width_list[9]);
+
             output_project->forward(out_list[10], output, 1, 1);
-            for (int i = 0; i < 10; ++i) {
+            for (int i = 0; i < 11; ++i) {
                 cudaFree(out_list[i]);
             }
         }
@@ -395,49 +395,49 @@ int main(int argc, char const *argv[]) {
     float * cuda_images;
     int * predicted_classes;
     int * host_predicted_classes = new int[batch_size];
-    // float * debug = new float[1 * 512 * 1 * 1];
+    float * debug = new float[batch_size * 512 * 7 * 7];
     cudaMalloc((void**)&predictions, sizeof(float) * batch_size * num_classes);
     cudaMalloc((void**)&cuda_images, sizeof(float) * batch_size * channels * height * width);
     cudaMalloc((void**)&predicted_classes, sizeof(int) * batch_size);
     CUDA_POST_MALLOC_CHECK;
     memset(host_predicted_classes, 0, sizeof(int) * batch_size);
 
-        while (dt.load_batch_data(batched_images, file_list, &batch_size) != -1) {
-            // printf("IMG\n");
-            // for (int i = 0; i < channels; ++i) {
-            //     printf("channel %d\n", i);
-            //     for (int j = 0; j< height; ++j) {
-            //         for (int k = 0; k < width; ++k)
-            //             printf("%f, ", batched_images[i * height * width + j * width + k]);
-            //         printf("\n");
-            //     }
-            //     printf("\n");
-            // }
-            cudaMemcpy(cuda_images, batched_images, sizeof(float) * batch_size * channels * height * width, cudaMemcpyHostToDevice);
-            // add a timing module to wrap forward
-            model.forward(cuda_images, predictions, height, width);
-            // float * temp = new float[batch_size * num_classes];
-            // cudaMemcpy(temp, predictions, sizeof(float) * batch_size * num_classes, cudaMemcpyDeviceToHost);
-            // for (int i = 0; i < batch_size; ++i) {
-            //     float max_val = temp[i * num_classes];
-            //     int max_idx = 0;
-            //     for (int j = 0; j < num_classes; ++j) {
-            //         if (temp[i * num_classes + j] > max_val) {
-            //             max_val = temp[i * num_classes + j];
-            //             max_idx = j;
-            //         }
-            //     }
-            //     printf("%d %d %f\n", i, max_idx, max_val);
-            // }
-            // add a timing module to wrap forward
-            argmax(predictions, predicted_classes, batch_size, num_classes);
-            cudaMemcpy(host_predicted_classes, predicted_classes, sizeof(int) * batch_size, cudaMemcpyDeviceToHost);
-            for (int i = 0; i < batch_size; ++i) {
-                // printf("%d %d\n", i, host_predicted_classes[i]);
-                file << file_list[i] << " " << std::to_string(host_predicted_classes[i]) << std::endl;
+    while (dt.load_batch_data(batched_images, file_list, &batch_size) != -1) {
+        // printf("IMG\n");
+        // for (int i = 0; i < channels; ++i) {
+        //     printf("channel %d\n", i);
+        //     for (int j = 0; j< height; ++j) {
+        //         for (int k = 0; k < width; ++k)
+        //             printf("%f, ", batched_images[i * height * width + j * width + k]);
+        //         printf("\n");
+        //     }
+        //     printf("\n");
+        // }
+        cudaMemcpy(cuda_images, batched_images, sizeof(float) * batch_size * channels * height * width, cudaMemcpyHostToDevice);
+        // add a timing module to wrap forward
+        model.forward(cuda_images, predictions, height, width, debug);
+        float * temp = new float[batch_size * num_classes];
+        cudaMemcpy(temp, predictions, sizeof(float) * batch_size * num_classes, cudaMemcpyDeviceToHost);
+        for (int i = 0; i < batch_size; ++i) {
+            float max_val = temp[i * num_classes];
+            int max_idx = 0;
+            for (int j = 0; j < num_classes; ++j) {
+                if (temp[i * num_classes + j] > max_val) {
+                    max_val = temp[i * num_classes + j];
+                    max_idx = j;
+                }
             }
-            // break;
+            printf("%d %d %f\n", i, max_idx, max_val);
         }
+        // add a timing module to wrap forward
+        argmax(predictions, predicted_classes, batch_size, num_classes);
+        cudaMemcpy(host_predicted_classes, predicted_classes, sizeof(int) * batch_size, cudaMemcpyDeviceToHost);
+        for (int i = 0; i < batch_size; ++i) {
+            printf("%d %d\n", i, host_predicted_classes[i]);
+            file << file_list[i] << " " << std::to_string(host_predicted_classes[i]) << std::endl;
+        }
+        // break;
+    }
 
     
     cudaFree(cuda_images);
