@@ -142,8 +142,11 @@ __global__ void wmma_rbmm_kernel(
     int m, int k, int n
 ) {
     int batch_idx = blockIdx.y;
-    int k_tile_dim = k / TC_TILE_WIDTH, n_tile_dim = n / TC_TILE_WIDTH;
+    int m_tile_dim = m / TC_TILE_WIDTH, k_tile_dim = k / TC_TILE_WIDTH, n_tile_dim = n / TC_TILE_WIDTH;
     int tile_idx = (blockIdx.x * blockDim.x + threadIdx.x) / WARP_SIZE;
+    if (tile_idx >= m_tile_dim * n_tile_dim)
+        return;
+    
     int m_tile_idx = tile_idx / n_tile_dim;   // row index in matrix_c in tile units
     int n_tile_idx = tile_idx % n_tile_dim;   // column index in matrix_c in tile units
     float *matrix_c_target_tile_ptr = batch_matrix_c + batch_idx * m * n + m_tile_idx * n_tile_dim * TC_TILE_WIDTH * TC_TILE_WIDTH + n_tile_idx * TC_TILE_WIDTH;
@@ -191,11 +194,15 @@ void wmma_rbmm(
     int aligned_k = ALIGN(k, TC_TILE_WIDTH);
     int aligned_n = ALIGN(n, TC_TILE_WIDTH);
 
+    MALLOC_ERR_DECLARATION;
+
     half *aligned_matrix_a, *aligned_batch_matrix_b;
     float *aligned_batch_matrix_c;
     cudaMalloc(&aligned_matrix_a, aligned_m * aligned_k * sizeof(half));
     cudaMalloc(&aligned_batch_matrix_b, batch_size * aligned_k * aligned_n * sizeof(half));
     cudaMalloc(&aligned_batch_matrix_c, batch_size * aligned_m * aligned_n * sizeof(float));
+
+    CUDA_POST_MALLOC_CHECK;
 
     // batch padding
     padding(matrix_a, aligned_matrix_a, m, k, TC_TILE_WIDTH);
@@ -220,13 +227,12 @@ void wmma_rbmm(
         aligned_m, aligned_k, aligned_n
     );
     cudaDeviceSynchronize();
+    CUDA_POST_KERNEL_CHECK;
 
     // batch unpadding
     for (int i = 0; i < batch_size; i++)
         unpadding(aligned_batch_matrix_c + i * aligned_m * aligned_n, batch_matrix_c + i * m * n, m, n, TC_TILE_WIDTH);
     
-
-
     cudaFree(aligned_matrix_a);
     cudaFree(aligned_batch_matrix_b);
     cudaFree(aligned_batch_matrix_c);

@@ -31,6 +31,7 @@ void mat_vec_add(T *mat, T *vec, T *res_mat, int height, int width) {
     dim3 block(TC_TILE_WIDTH, TC_TILE_WIDTH);
     dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y);
     mat_vec_add_kernel<<<grid, block>>>(mat, vec, res_mat, height, width);
+    CUDA_POST_KERNEL_CHECK;
 }
 
 template void mat_vec_add<float>(float *mat, float *vec, float *res_mat, int height, int width);
@@ -68,6 +69,7 @@ void batch_mat_vec_add(T *mat, T *vec, T *res_mat, int height, int width, int ba
     dim3 block(TC_TILE_WIDTH, TC_TILE_WIDTH);
     dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y, batch_size);
     batch_mat_vec_add_kernel<<<grid, block>>>(mat, vec, res_mat, height, width, batch_size);
+    CUDA_POST_KERNEL_CHECK;
 }
 
 template void batch_mat_vec_add<float>(float *mat, float *vec, float *res_mat, int height, int width, int batch_size);

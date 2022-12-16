@@ -1,0 +1,1 @@
+nvcc src/conv/conv.cu src/conv/gemm.cu src/conv/im2col.cu src/conv/mat_vec_add.cu src/conv/float_half_trans.cu src/activation/pooling.cu src/activation/relu.cu src/utils/argmax.cu src/utils/batch_add.cu evaluate.cu src/utils/load_parameters.cpp -o test -I./include -I/usr/local/include/opencv4 -arch=sm_70 `pkg-config --libs opencv4`

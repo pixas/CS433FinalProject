@@ -102,7 +102,6 @@ void im2col_gpu(
     // printf("height_col: %d, width_col: %d, num_kernels: %d\n", height_col, width_col, num_kernels);
 
     dim3 grid(CUDA_GET_BLOCKS(num_kernels), batch_size);
-
     im2col_gpu_kernel<<<grid, CUDA_NUM_THREADS>>>(
         num_kernels, data_im,
         channels, height, width,
@@ -113,7 +112,7 @@ void im2col_gpu(
         height_col, width_col,
         data_col
     );
-    cudaPeekAtLastError();
+    CUDA_POST_KERNEL_CHECK;
 }
 
 // float im[3][3][16] = {

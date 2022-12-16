@@ -10,4 +10,9 @@
 
 #define ALIGN(x, y) ((x + y - 1) / y * y)
 
+#include <stdio.h>
+#define MALLOC_ERR_DECLARATION cudaError_t malloc_err;
+#define CUDA_POST_KERNEL_CHECK cudaError_t kernel_err = cudaGetLastError(); if (kernel_err != cudaSuccess) { printf("CUDA kernel failed : %s\n%s at L%d in %s\n", cudaGetErrorString(kernel_err), __FILE__, __LINE__, __FUNCTION__); exit(-1); }
+#define CUDA_POST_MALLOC_CHECK malloc_err = cudaGetLastError(); if (malloc_err != cudaSuccess) { printf("CUDA malloc failed : %s\n%s at L%d in %s\n", cudaGetErrorString(malloc_err), __FILE__, __LINE__, __FUNCTION__); exit(-1); }
+
 #endif

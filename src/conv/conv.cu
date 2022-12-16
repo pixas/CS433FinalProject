@@ -2,6 +2,7 @@
 #include "gemm.hpp"
 #include "mat_vec_add.hpp"
 #include "float_half_trans.hpp"
+#include "common.hpp"
 #include "conv.hpp"
 
 /**
@@ -43,10 +44,13 @@ void conv(
     const int output_h = (height + 2 * pad_h - eq_kernel_h) / stride_h + 1; // output height (without consideration of channel)
     const int output_w = (width + 2 * pad_w - eq_kernel_w) / stride_w + 1;  // output weight (without consideration of channel)
 
+    MALLOC_ERR_DECLARATION;
+
     /* float2half begin */
     half *data_input_half, *data_kernel_half;
     cudaMalloc((void**)&data_input_half, batch_size * channels * height * width * sizeof(half));
     cudaMalloc((void**)&data_kernel_half, channels * kernel_h * kernel_w * num_kernels * sizeof(half));
+    CUDA_POST_MALLOC_CHECK;
     float2half(data_input, data_input_half, batch_size * channels * height * width);
     float2half(data_kernel, data_kernel_half, channels * kernel_h * kernel_w * num_kernels);
     /* float2half end */
@@ -55,6 +59,7 @@ void conv(
     const int col_size = batch_size * channels * kernel_h * kernel_w * output_h * output_w; // size of columns
     half *data_col;
     cudaMalloc((void **)&data_col, sizeof(half) * col_size);
+    CUDA_POST_MALLOC_CHECK;
 
     im2col_gpu(
         data_input_half,
@@ -71,6 +76,7 @@ void conv(
     /* matrix multiplication begin */
     float *tmp_mult_res;
     cudaMalloc((void **)&tmp_mult_res, sizeof(float) * batch_size * num_kernels * output_h * output_w);
+    CUDA_POST_MALLOC_CHECK;
     wmma_rbmm(
         data_kernel_half, data_col, tmp_mult_res,
         batch_size, num_kernels, channels * kernel_h * kernel_w, output_h * output_w
@@ -83,6 +89,7 @@ void conv(
         num_kernels, output_h * output_w, batch_size
     );
     /* add bias end */
+    CUDA_POST_KERNEL_CHECK;
 
     cudaFree(tmp_mult_res);
     cudaFree(data_col);

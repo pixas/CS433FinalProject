@@ -1,5 +1,5 @@
 #include "model_utils.hpp"
-
+#include "common.hpp"
 #include <iostream>
 
 
@@ -15,14 +15,8 @@
  */
 template<typename T>
 __global__ void relu_kernel(T *input, T *output, int height, int width, int input_dim) {
-//  int batch_size = gridDim.z;
     int batch_idx = blockIdx.z;
 
-    // int block_idx = gridDim.x * gridDim.y * blockIdx.z + gridDim.x * blockIdx.y + blockIdx.x;
-    // int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-    // int current_id = thread_idx + block_idx * blockDim.x * blockDim.y;
-
-//  int n_points = height * width;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -33,7 +27,6 @@ __global__ void relu_kernel(T *input, T *output, int height, int width, int inpu
             output[cur_idx] = max(cur_value, 0.);
         }
     }
-
 }
 
 /**
@@ -55,5 +48,3 @@ void relu(T *input, T *output, int batch_size, int height, int width, int input_
 }
 
 template void relu<float>(float *input, float * output, int batch_size, int height, int width, int input_dim);
-
- 

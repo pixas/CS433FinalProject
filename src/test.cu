@@ -7,85 +7,83 @@ using namespace nvcuda;
 
 using namespace std;
 
-float kernels_o[3 * 27] = {
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-    2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+float kernels_o[1 * 3 * 49] = {
+    // channel 0
+    -0.002, -0.001, -0.000, 0.017, 0.013, 0.004, -0.003,
+    0.003, 0.002, -0.026, -0.065, -0.063, -0.030, 0.001,
+    -0.002, 0.014, 0.069, 0.137, 0.121, 0.060, 0.015,
+    0.007, -0.016, -0.070, -0.102, -0.063, -0.000, 0.013,
+    -0.006, 0.004, 0.017, -0.013, -0.078, -0.098, -0.060,
+    0.007, 0.010, 0.015, 0.056, 0.096, 0.092, 0.039,
+    -0.003, -0.001, -0.006, -0.015, -0.035, -0.019, -0.001,
+    // channel 1
+    -0.003, -0.006, -0.008, 0.009, 0.008, 0.000, -0.006,
+    0.011, 0.008, -0.024, -0.072, -0.073, -0.037, -0.000,
+    -0.000, 0.023, 0.094, 0.179, 0.165, 0.086, 0.029,
+    -0.001, -0.030, -0.098, -0.138, -0.089, -0.010, 0.014,
+    -0.013, -0.001, 0.006, -0.035, -0.108, -0.133, -0.085,
+    0.008, 0.013, 0.023, 0.074, 0.127, 0.112, 0.046,
+    0.001, 0.002, -0.004, -0.016, -0.035, -0.018, 0.000,
+    // channel 2
+    -0.000, -0.002, 0.005, 0.021, 0.021, 0.008, -0.005,
+    0.004, -0.004, -0.029, -0.069, -0.059, -0.030, -0.007,
+    0.002, 0.011, 0.051, 0.100, 0.081, 0.024, 0.004,
+    0.006, -0.006, -0.046, -0.062, -0.025, 0.018, 0.028,
+    -0.007, 0.004, 0.023, 0.014, -0.027, -0.060, -0.036,
+    0.005, -0.001, -0.009, 0.013, 0.056, 0.057, 0.027,
+    0.000, 0.000, -0.002, -0.013, -0.035, -0.027, -0.009,
 };
 
-float im[3 * 3 * 4 * 4] = {
-    //img 1
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+float im[1 * 3 * 4 * 4] = {
+    //channel 0
+    169.000000, 156.000000, 45.000000, 48.000000,
+    170.000000, 174.000000, 54.000000, 54.000000,
+    170.000000, 178.000000, 59.000000, 50.000000,
 
-    //img 2
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    //channel 1
+    176.000000, 164.000000, 71.000000, 69.000000,
+    175.000000, 180.000000, 74.000000, 72.000000,
+    175.000000, 178.000000, 78.000000, 70.000000,
+    174.000000, 181.000000, 92.000000, 70.000000,
 
-    //img 3
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+    //channel 2
+    142.000000, 136.000000, 75.000000, 71.000000,
+    147.000000, 150.000000, 74.000000, 79.000000,
+    146.000000, 166.000000, 81.000000, 78.000000,
+    145.000000, 153.000000, 88.000000, 87.000000,
 };
 
-float bias_o[3] = { 1, 2, 3 };
+float bias_o[1] = { 0.230 };
 
 int main() {
-    float *kernels = new float[3 * 27];
-    float *im_h = new float[3 * 3 * 4 * 4];
-    
-    for (int i = 0; i < 3 * 27; i++) {
-        kernels[i] = (kernels_o[i]);
-    }
-    for (int i = 0; i < 3 * 3 * 4 * 4; i++) {
-        im_h[i] = (im[i]);
-    }
+    float *d_kernel, *d_im, *d_bias, *d_out;
+    cudaMalloc(&d_kernel, sizeof(float) * 1 * 3 * 49);
+    cudaMalloc(&d_im, sizeof(float) * 1 * 3 * 4 * 4);
+    cudaMalloc(&d_bias, sizeof(float) * 1);
+    cudaMalloc(&d_out, sizeof(float) * 1 * 1 * 4 * 4);
 
-    float *d_kernels, *d_im;
-    float *d_bias;
-    float *d_out;
-    cudaMalloc(&d_kernels, 3 * 27 * sizeof(float));
-    cudaMalloc(&d_im, 3 * 3 * 4 * 4 * sizeof(float));
-    cudaMalloc(&d_bias, 3 * sizeof(float));
-    cudaMalloc(&d_out, 3 * 3 * 2 * 2 * sizeof(float));
-
-    cudaMemcpy(d_kernels, kernels, 3 * 27 * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_im, im_h, 3 * 3 * 4 * 4 * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_bias, bias_o, 3 * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_kernel, kernels_o, sizeof(float) * 1 * 3 * 49, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_im, im, sizeof(float) * 1 * 3 * 4 * 4, cudaMemcpyHostToDevice);
+    cudaMemcpy(d_bias, bias_o, sizeof(float) * 1, cudaMemcpyHostToDevice);
 
     conv(
-        d_im, 
-        3, 3, 4, 4,
-        d_kernels,
-        3, 3, 3,
-        0, 0, 
-        1, 1,
-        1, 1,
-        d_bias,
+        d_im, 1, 3, 4, 4,
+        d_kernel, 1, 7, 7,
+        3, 3, 1, 1, 0, 0, d_bias,
         d_out
     );
 
-    float *out = new float[3 * 3 * 2 * 2];
-    cudaMemcpy(out, d_out, 3 * 3 * 2 * 2 * sizeof(float), cudaMemcpyDeviceToHost);
+    float *out = new float[1 * 1 * 4 * 4];
+    cudaMemcpy(out, d_out, sizeof(float) * 1 * 1 * 4 * 4, cudaMemcpyDeviceToHost);
 
-    for (int i = 0; i < 3; ++i) {
-        cout << "img" << i << endl;
-        for (int j = 0; j < 3; ++j) {
-            cout << "channel" << j << endl;
-            for (int k = 0; k < 2; ++k) {
-                for (int l = 0; l < 2; ++l) {
-                    cout << out[i * 3 * 2 * 2 + j * 2 * 2 + k * 2 + l] << " ";
-                }
-                cout << endl;
-            }
-            cout << endl;
+    for (int i = 0; i < 4; i++) {
+        for (int j = 0; j < 4; j++) {
+            cout << out[i * 4 + j] << " ";
         }
         cout << endl;
     }
 
-    cudaFree(d_kernels);
+    cudaFree(d_kernel);
     cudaFree(d_im);
     cudaFree(d_bias);
     cudaFree(d_out);
