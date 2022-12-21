@@ -56,7 +56,8 @@ int main(int argc, char const *argv[])
     std::unordered_set<std::string> error_file_list = get_error_file("/home/group14/CS433FinalProject/task1/error_file_list.txt");
     net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);
     net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);
-    double pass_time = 0;
+
+    std::chrono::duration<double> forward_time;
     for (auto & file_name : file_list) {
         cv::Mat image = cv::imread(file_name);
         cv::Mat resized_image;
@@ -70,13 +71,13 @@ int main(int argc, char const *argv[])
 
         cv::Mat blob;
         cv::dnn::blobFromImage(resized_image4, blob, 1.0, cv::Size(224, 224));
-        double t = cv::getTickCount(); 
+        
         auto start_time = std::chrono::high_resolution_clock::now();
         net.setInput(blob);
         cv::Mat output = net.forward();
         auto end_time = std::chrono::high_resolution_clock::now();
-        // t = (cv::getTickCount() - t) / cv::getTickFrequency();
-        pass_time += (end_time - start_time).count();
+        forward_time += end_time - start_time;
+        
         double max_value;
         cv::Point max_index;
         cv::minMaxLoc(output, NULL, &max_value, NULL, &max_index);
@@ -85,6 +86,10 @@ int main(int argc, char const *argv[])
             print_mat(output);
         }
     }
-    // std::cout << "Cost " << pass_time << "s\n";
+
+    std::ofstream benchmark_output("/home/group14/CS433FinalProject/task1/target/benchmark/benchmark_oracle.txt");
+    benchmark_output << forward_time.count() << "s" << std::endl;
+    benchmark_output.close();  
+
     return 0;
 }

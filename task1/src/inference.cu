@@ -1,4 +1,3 @@
-// 存放整个模型，include 卷积等算子，有一个
 #include <cuda_runtime_api.h>
 #include <unordered_map>
 #include <iostream>

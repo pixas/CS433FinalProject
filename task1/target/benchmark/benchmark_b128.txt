@@ -1,13 +1,13 @@
 DataLoader initialized
 -- batch size: 128 --
-model cuda init time: 0.198159s, 2.123948%
-model load time: 0.013301s, 0.142569%
-data loader init time: 0.001561s, 0.016736%
-img cuda malloc time: 0.000381s, 0.004079%
-output malloc time: 0.000022s, 0.000239%
-cuda copy img time: 1.419626s, 15.216149%
-forward time: 7.654581s, 82.045035%
-argmax time: 0.004130s, 0.044270%
-cuda copy output time: 0.001630s, 0.017467%
-save output to file time: 0.036340s, 0.389508%
-total time: 9.329731s
+model cuda init time: 0.218389s, 1.499687%
+model load time: 0.053360s, 0.366428%
+data loader init time: 0.001551s, 0.010653%
+img cuda malloc time: 0.000370s, 0.002538%
+output malloc time: 0.000023s, 0.000156%
+cuda copy img time: 1.433720s, 9.845433%
+forward time: 12.751766s, 87.567059%
+argmax time: 0.060468s, 0.415237%
+cuda copy output time: 0.001864s, 0.012802%
+save output to file time: 0.040776s, 0.280008%
+total time: 14.562286s
