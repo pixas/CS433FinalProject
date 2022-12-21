@@ -13,6 +13,14 @@
 #include "gemm.hpp"
 #include "mat_vec_add.hpp"
 #include "common.hpp"
+#include <chrono>
+
+/* Global Variable Begin */
+const int channels = 3;
+const int height = 224;
+const int width = 224;
+const int num_classes = 1000;
+/* Global Variable End */
 
 class Conv2d{
     private:
@@ -43,8 +51,6 @@ class Conv2d{
                 pad_h = pad;
                 pad_w = pad;
             }
-            cudaMalloc((void**)&cuda_weight, sizeof(float) * input_channel * output_channel * kernel_h * kernel_w);
-            cudaMalloc((void**)&cuda_bias, sizeof(float) * output_channel);
             on_cuda = false;
         }
 
@@ -97,8 +103,6 @@ public:
     void cuda() {}
 };
 
-
-
 class BasicBlock{
 private:
     int bsz;
@@ -135,6 +139,7 @@ public:
         output_w = width / stride;
 
         MALLOC_ERR_DECLARATION;
+        /* TODO: malloc in cuda() */
         cudaMalloc((void**)&identity, sizeof(float) * bsz * out_channel * output_h * output_w);
         cudaMalloc((void**)&out, sizeof(float) * bsz * out_channel * output_h * output_w);
         CUDA_POST_MALLOC_CHECK;
@@ -148,15 +153,10 @@ public:
             cudaMemcpy(identity, input, sizeof(float) * bsz * out_channel * output_h * output_w , cudaMemcpyDeviceToDevice);
         }
         batch_add(output, identity, output, bsz, out_channel, output_h, output_w);
-        relu->forward(output, output, output_h, output_w);     
+        relu->forward(output, output, output_h, output_w);
+
         cudaFree(identity);
-           
-    }
-    int get_output_height() {
-        return output_h;
-    }    
-    int get_output_width() {
-        return output_w;
+        cudaFree(out);
     }
 
     void cuda() {
@@ -193,6 +193,8 @@ private:
     float * cuda_bias;
     int in_channel;
     int out_channel;
+
+    half *intermediate_output;  // matrix multiplication output, bias addition input
 public:
     Linear(int batch_size, int in_channel, int out_channel) {
         bsz = batch_size;
@@ -206,27 +208,23 @@ public:
         float2half(cuda_weight, cuda_weight_half, in_channel * out_channel);
     }
     void forward(float * input, float * output, int height, int width) {
-        half * temp_input;
-
-        cudaMalloc((void**)&temp_input, sizeof(half) * bsz * in_channel * height * width);
-        
-        float2half(input, temp_input, bsz * in_channel * height * width);
-        wmma_rbmm(cuda_weight_half, temp_input, output, bsz, out_channel, in_channel, height * width);
+        float2half(input, intermediate_output, bsz * in_channel * height * width);
+        wmma_rbmm(cuda_weight_half, intermediate_output, output, bsz, out_channel, in_channel, height * width);
         batch_add(output, cuda_bias, output, bsz, out_channel, 1, 1);
-
-        cudaFree(temp_input);
     }
     void cuda() {
         MALLOC_ERR_DECLARATION;
         cudaMalloc((void**)&cuda_weight, sizeof(float) * in_channel * out_channel);
         cudaMalloc((void**)&cuda_bias, bsz * sizeof(float) * out_channel);
         cudaMalloc((void**)&cuda_weight_half, sizeof(half) * in_channel * out_channel);
+        cudaMalloc((void**)&intermediate_output, sizeof(half) * bsz * in_channel * height * width);
         CUDA_POST_MALLOC_CHECK;
     }
     ~Linear() {
         cudaFree(cuda_weight);
         cudaFree(cuda_bias);    
         cudaFree(cuda_weight_half);
+        cudaFree(intermediate_output);
     }
 };
 
@@ -263,6 +261,8 @@ class ResNet18{
             14, 14,     // block4, block5
             7, 7        // block6, block7
         };
+        float **out_list;   // intermediate output
+
     public:
         ResNet18(int batch_size, int num_classes=1000) {
             bsz = batch_size;
@@ -283,15 +283,10 @@ class ResNet18{
             block[7] = new BasicBlock(batch_size, 512, 512);
             
             output_project = new Linear(batch_size, 512, num_classes);
+            out_list = new float*[11];
         }
 
-        void forward(float * input, float * output, int height, int width, float * debug) {
-            float ** out_list = new float*[11];
-
-            for (int i = 0; i < 10; ++i) {
-                cudaMalloc((void**)&(out_list[i]), sizeof(float) * bsz * out_channels[i] * height_list[i] * width_list[i]);
-            }
-            cudaMalloc((void**)&(out_list[10]), sizeof(float) * bsz * out_channels[9]);
+        void forward(float * input, float * output, int height, int width) {
             conv1->forward(input, out_list[0], height, width);
             relu1->forward(out_list[0], out_list[0], height_list[0], width_list[0]);
             max_pool_2d(out_list[0], out_list[1], bsz, out_channels[1], height_list[0], width_list[0], 3, 3, 1, 2);
@@ -301,24 +296,10 @@ class ResNet18{
                     height_list[i+1], width_list[i+1]
                 );
             }
-            cudaMemcpy(debug, out_list[9], sizeof(float) * bsz * out_channels[9] * height_list[9] * width_list[9], cudaMemcpyDeviceToHost);
-            for (int b = 0; b < bsz; ++b) {
-
-                for (int i = 0; i < height_list[9]; ++i) {
-                    for (int j = 0; j < width_list[9]; ++j) {
-                        printf("%.3f%s", debug[b * out_channels[9] * height_list[9] * width_list[9] + i * width_list[9] + j], (j == width_list[9] - 1 ? "\n": " "));
-                    }
-                }
-                printf("\n");
-            }
             
-            // for (int i = )
             adaptive_mean_pool(out_list[9], out_list[10], bsz, out_channels[9], height_list[9], width_list[9]);
 
             output_project->forward(out_list[10], output, 1, 1);
-            for (int i = 0; i < 11; ++i) {
-                cudaFree(out_list[i]);
-            }
         }
 
         void cuda() {
@@ -330,6 +311,10 @@ class ResNet18{
             for (int i = 0; i < 8; ++i)
                 block[i]->cuda();
             output_project->cuda();
+            for (int i = 0; i < 10; ++i) {
+                cudaMalloc((void**)&(out_list[i]), sizeof(float) * bsz * out_channels[i] * height_list[i] * width_list[i]);
+            }
+            cudaMalloc((void**)&(out_list[10]), sizeof(float) * bsz * out_channels[9]);
         }
 
         ~ResNet18(){
@@ -350,6 +335,9 @@ class ResNet18{
             delete [] block;
             output_project->~Linear();
             delete output_project;
+            for (int i = 0; i < 11; ++i) {
+                cudaFree(out_list[i]);
+            }
         }
         void load_from_statedict(std::unordered_map<std::string,std::unordered_map<std::string, float *>>& state_dict) {
             conv1->load_from_statedict(state_dict["onnx_node!Conv_0"]);
@@ -375,18 +363,16 @@ int main(int argc, char const *argv[]) {
     cv::String model_name = "resnet18.onnx";
     std::unordered_map<std::string, std::unordered_map<std::string, float *>> state_dict = obtain_layer_info(model_name);
     int batch_size = atoi(argv[1]);
-    const int channels = 3;
-    const int height = 224;
-    const int width = 224;
-    const int num_classes = 1000;
     ResNet18 model(batch_size);
     model.cuda();
     CUDA_POST_MALLOC_CHECK;
     model.load_from_statedict(state_dict);
-    DataLoader dt = DataLoader("/home/group14/CS433FinalProject/select_file_list.txt", batch_size);
+    // DataLoader dt = DataLoader("/home/group14/CS433FinalProject/select_file_list.txt", batch_size);
+    DataLoader dt = DataLoader("/home/group14/CS433FinalProject/error_file_list.txt", batch_size);
+
     printf("DataLoader initialized\n");
 
-    std::ofstream file("predictions.txt");
+    std::ofstream file("error_list_predictions.txt");
 
     std::vector<std::string> file_list;
     float * batched_images = (float*)malloc(sizeof(float) * batch_size * channels * height * width);
@@ -402,44 +388,32 @@ int main(int argc, char const *argv[]) {
     CUDA_POST_MALLOC_CHECK;
     memset(host_predicted_classes, 0, sizeof(int) * batch_size);
 
+    std::chrono::duration<double> elapsed;
+    int batch_num = 0;
     while (dt.load_batch_data(batched_images, file_list, &batch_size) != -1) {
-        // printf("IMG\n");
-        // for (int i = 0; i < channels; ++i) {
-        //     printf("channel %d\n", i);
-        //     for (int j = 0; j< height; ++j) {
-        //         for (int k = 0; k < width; ++k)
-        //             printf("%f, ", batched_images[i * height * width + j * width + k]);
-        //         printf("\n");
-        //     }
-        //     printf("\n");
-        // }
         cudaMemcpy(cuda_images, batched_images, sizeof(float) * batch_size * channels * height * width, cudaMemcpyHostToDevice);
         // add a timing module to wrap forward
-        model.forward(cuda_images, predictions, height, width, debug);
-        float * temp = new float[batch_size * num_classes];
-        cudaMemcpy(temp, predictions, sizeof(float) * batch_size * num_classes, cudaMemcpyDeviceToHost);
-        for (int i = 0; i < batch_size; ++i) {
-            float max_val = temp[i * num_classes];
-            int max_idx = 0;
-            for (int j = 0; j < num_classes; ++j) {
-                if (temp[i * num_classes + j] > max_val) {
-                    max_val = temp[i * num_classes + j];
-                    max_idx = j;
-                }
-            }
-            printf("%d %d %f\n", i, max_idx, max_val);
-        }
+        auto batch_start = std::chrono::high_resolution_clock::now();
+        model.forward(cuda_images, predictions, height, width);
         // add a timing module to wrap forward
         argmax(predictions, predicted_classes, batch_size, num_classes);
+        auto batch_end = std::chrono::high_resolution_clock::now();
+        elapsed += batch_end - batch_start;
+        
         cudaMemcpy(host_predicted_classes, predicted_classes, sizeof(int) * batch_size, cudaMemcpyDeviceToHost);
         for (int i = 0; i < batch_size; ++i) {
-            printf("%d %d\n", i, host_predicted_classes[i]);
             file << file_list[i] << " " << std::to_string(host_predicted_classes[i]) << std::endl;
+            float *debug_output = new float[num_classes];
+            cudaMemcpy(debug_output, predictions + i * num_classes, sizeof(float) * num_classes, cudaMemcpyDeviceToHost);
+            for (int j = 0; j < num_classes; ++j) {
+                printf("%d %f\n", j, debug_output[j]);
+            }
         }
-        // break;
+        printf("batch %d finished\n", ++batch_num);
     }
+    auto end = std::chrono::high_resolution_clock::now();
+    printf("time consumption: %f\n", elapsed.count());
 
-    
     cudaFree(cuda_images);
     cudaFree(predictions);
     cudaFree(predicted_classes);

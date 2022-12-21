@@ -1,1 +1,0 @@
-nvcc argmax.cu -arch=sm_70 -o testargmax -I../../include

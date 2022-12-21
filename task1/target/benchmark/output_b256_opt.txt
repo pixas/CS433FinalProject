@@ -1,0 +1,53 @@
+DataLoader initialized
+batch 1 finished
+batch 2 finished
+batch 3 finished
+batch 4 finished
+batch 5 finished
+batch 6 finished
+batch 7 finished
+batch 8 finished
+batch 9 finished
+batch 10 finished
+batch 11 finished
+batch 12 finished
+batch 13 finished
+batch 14 finished
+batch 15 finished
+batch 16 finished
+batch 17 finished
+batch 18 finished
+batch 19 finished
+batch 20 finished
+batch 21 finished
+batch 22 finished
+batch 23 finished
+batch 24 finished
+batch 25 finished
+batch 26 finished
+batch 27 finished
+batch 28 finished
+batch 29 finished
+batch 30 finished
+batch 31 finished
+batch 32 finished
+batch 33 finished
+batch 34 finished
+batch 35 finished
+batch 36 finished
+batch 37 finished
+batch 38 finished
+batch 39 finished
+batch 40 finished
+-- batch size: 256 --
+model cuda init time: 1.883361s, 17.110017%
+model load time: 0.017641s, 0.160269%
+data loader init time: 0.002144s, 0.019476%
+img cuda malloc time: 0.000463s, 0.004203%
+output malloc time: 0.000022s, 0.000204%
+cuda copy img time: 1.506220s, 13.683757%
+forward time: 7.537898s, 68.480549%
+argmax time: 0.003225s, 0.029296%
+cuda copy output time: 0.000896s, 0.008141%
+save output to file time: 0.055487s, 0.504089%
+total time: 11.007357s

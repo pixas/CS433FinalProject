@@ -1,1 +1,0 @@
-nvcc pooling.cu -arch=sm_70 -o testpooling -I../../include
