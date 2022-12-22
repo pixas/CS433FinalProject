@@ -44,21 +44,47 @@ __half __float2half(const float &a) {
   return result;
 }
 
+void print_binary(uint32_t bits) {
+  char binary[33];
+  for (int i = 0; i < 32; ++i) {
+    binary[31 - i] = (bits & (1 << i)) ? '1' : '0';
+  }
+  binary[32] = '\0';
+  printf("%s\n", binary);
+}
+
 float __half2float(const __half &a) {
   uint16_t bits = (uint16_t)(a.getX());
   int sign = (bits >> 15) & 1;
   int exponent = (bits >> 10) & 0x1f;
   int mantissa = bits & 0x3ff;
+  int result;
   if (exponent == 0) {
     // Denormalized number
-    return (float)(pow(-1, sign) * pow(2, -14) * (mantissa / pow(2, 10)));
+    // return (float)(pow(-1, sign) * pow(2, -14) * (mantissa / pow(2, 10)));
+    int highest_bit = 0;
+    int temp = mantissa;
+    while (temp) {
+      ++highest_bit;
+      temp >>= 1;
+    }
+    // exponent = - 14 - (11 - highest_bit) + 127;
+    exponent = 102 + highest_bit;
+    mantissa = ((1 << (exponent - 103)) + (mantissa >> (126 - exponent))) & 0x7fffff;
   } else if (exponent == 0x1f) {
     // Inf or NaN
-    return (float)((exponent == 0x1f && mantissa == 0) ? pow(-1, sign) * INFINITY : NAN);
+    // return (float)((exponent == 0x1f && mantissa == 0) ? pow(-1, sign) * INFINITY : NAN);
+    exponent = 0xff;
+    mantissa = mantissa ? 0x400000 : 0x0;
   } else {
     // Normalized number
-    return (float)(pow(-1, sign) * pow(2, exponent - 15) * (1 + mantissa / pow(2, 10)));
+    // return (float)(pow(-1, sign) * pow(2, exponent - 15) * (1 + mantissa / pow(2, 10)));
+    // exp_f - 127 = exp_h - 15, exp_f = exp_h + 112
+    exponent = exponent + 112;
+    mantissa = mantissa << 13;
   }
+  result = (sign << 31) | (exponent << 23) | mantissa;
+  return *reinterpret_cast<float*>(&result);
 }
 
 float operator*(const __half &lh, const __half &rh) {
@@ -240,8 +266,10 @@ void GPU::SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, boo
   }
 }
 
-void GPU::SIM_LOP3_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc,
-                         unsigned imm) {
+void GPU::SIM_LOP3_INSTR(
+  unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc,
+  unsigned imm
+) {
   // for: warp execuation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; threadIdx++) {
     // LOP3 implementation
@@ -352,28 +380,32 @@ void simMalloc(void **ptr, size_t size, GPU &volta) {
   volta.allocated_size_ += size;
 }
 
+inline int check_in_GPU(void *ptr, size_t count, GPU &volta) {
+  // Check that the whole memory block is within the bounds of the GPU memory
+  if (
+    (unsigned char*)ptr >= (unsigned char*)(volta.memory_) &&
+    (unsigned char*)ptr + count <= (unsigned char*)(volta.memory_ + volta.memory_size_)
+  )
+    return 1;
+  return 0;
+}
+
 void simMemcpy(void *dst, void *src, size_t count, enum cudaMemcpyKind kind,
                GPU &volta) {
   // sim cudaMemcpy
   // memcpy host memory to class GPU memory or
   // memcpy class GPU memory to host memory
   // Check that the destination and source pointers are within the bounds of the GPU memory
-  if ((kind == MemcpyHostToDevice && (unsigned char*)dst < (unsigned  char*)(volta.memory_ + volta.memory_size_)) ||
-      (kind == MemcpyDeviceToHost && (unsigned char*)src < (unsigned  char*)(volta.memory_ + volta.memory_size_))) {
+  if (
+    (kind == MemcpyHostToDevice && check_in_GPU(dst, count, volta)) ||
+    (kind == MemcpyDeviceToHost && check_in_GPU(src, count, volta))
+  ) {
     // Invalid destination or source pointer, throw an exception or return an error code
     throw std::invalid_argument("Invalid memory address");
   }
 
   // Copy memory between the host and the GPU
-  unsigned char *dst_ptr = (unsigned char*)dst;
-  unsigned char *src_ptr = (unsigned char*)src;
-  if (kind == MemcpyHostToDevice) {
-    // Copy from host to device
-    memcpy(dst_ptr, src_ptr, count);
-  } else {
-    // Copy from device to host
-    memcpy(dst_ptr, src_ptr, count);
-  }
+  memcpy(dst, src, count);
 }
 
 void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
@@ -411,7 +443,7 @@ int main() {
   for (int i = 0; i < 16; i++) {
     ha_list[i] = __float2half(a_list[i]);
     hb_list[i] = __float2half(b_list[i]);
-    // std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
+    std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
   }
 
   for (int i = 0; i < 16; i++) {
