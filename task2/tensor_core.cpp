@@ -1,37 +1,47 @@
 #include "tensor_core.h"
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
+#include <stdlib.h>
+
+using namespace std;
 
 __half __float2half(const float &a) {
   uint32_t bits = *(uint32_t*)&a;
-  int sign = (bits >> 31) & 1;
+  int sign = (bits >> 31) & 0x1;
   int exponent = (bits >> 23) & 0xff;
-  int mantissa = bits & 0x7fffff;
+  int mantissa = bits & 0x007fffff;
   __half result;
   if (exponent == 0) {
-    // Denormalized number
-    result.setX((unsigned short)((sign << 15) | (int)(mantissa / pow(2, -14))));
-    return result;
+    // Denormalized number --> Underflow
+    exponent = mantissa = 0;
   } else if (exponent == 0xff) {
     // Inf or NaN
-    result.setX((unsigned short)((sign << 15) | (0x1f << 10) | (mantissa ? 0x200 : 0)));
-    return result;
+    exponent = 0x1f;
+    mantissa = mantissa ? 0x200 : 0;
   } else {
     // Normalized number
-    exponent = exponent - 127 + 15;
-    if (exponent >= 0x1f) {
+    if (exponent - 127 > 15) {
       // Overflow
       exponent = 0x1f;
       mantissa = 0;
-    } else if (exponent <= 0) {
+    } else if (exponent - 127 >= -14) {
+      // Normalized float -> normalized half, true exp in range [-14, 15], exp in range [113, 142]
+      // exp - 127 + 15 = exp - 112
+      exponent = exponent - 112;
+      mantissa = (mantissa >> 13) & 0x3ff;
+    } else if (exponent - 127 >= -24) {
+      // Normalized float -> denormalized half, true exp in range [-24, -15], exp in range [103, 112]
+      // exp - 103 = exp - 127 + 24, 126 - exp = -exp - 1 + 127
+      mantissa = ((1 << (exponent - 103)) + (mantissa >> (126 - exponent))) & 0x3ff;
+      exponent = 0;
+    } else {
       // Underflow
       exponent = mantissa = 0;
-    } else {
-      mantissa = mantissa >> 13;
     }
-    result.setX((unsigned short)((sign << 15) | (exponent << 10) | mantissa));
-    return result;
   }
+  result.setX((unsigned short)((sign << 15) | (exponent << 10) | mantissa));
+  return result;
 }
 
 float __half2float(const __half &a) {
@@ -52,52 +62,9 @@ float __half2float(const __half &a) {
 }
 
 float operator*(const __half &lh, const __half &rh) {
-  uint16_t bits_a = lh.getX();
-  uint16_t bits_b = rh.getX();
-  int sign_a = (bits_a >> 15) & 1;
-  int exponent_a = (bits_a >> 10) & 0x1f;
-  int mantissa_a = bits_a & 0x3ff;
-  int sign_b = (bits_b >> 15) & 1;
-  int exponent_b = (bits_b >> 10) & 0x1f;
-  int mantissa_b = bits_b & 0x3ff;
-  int sign = sign_a ^ sign_b;
-  int exponent = exponent_a + exponent_b - 15;
-  int mantissa = mantissa_a * mantissa_b;
-  if (exponent_a == 0) {
-    // a is denormalized
-    exponent_a -= 14;
-    mantissa_a <<= 10;
-  } else {
-    mantissa_a += 0x400;
-  }
-  if (exponent_b == 0) {
-    // b is denormalized
-    exponent_b -= 14;
-    mantissa_b <<= 10;
-  } else {
-    mantissa_b += 0x400;
-  }
-  exponent += exponent_a + exponent_b - 15;
-  if (exponent > 30) {
-    // Overflow
-    return INFINITY;
-  } else if (exponent <= 0) {
-    // Underflow
-    return 0.0;
-  } else {
-    mantissa = (mantissa_a * mantissa_b + 0x200) >> 10;
-    if (mantissa & 0x400) {
-      // Rounding
-      mantissa += 0x400;
-      exponent += 1;
-    }
-    if (exponent >= 0x1f) {
-      // Overflow
-      return INFINITY;
-    } else {
-      return (float)((sign << 15) | (exponent << 10) | (mantissa & 0x3ff));
-    }
-  }
+  float a = __half2float(lh);
+  float b = __half2float(rh);
+  return a * b;
 }
 
 GPU::GPU() {
@@ -433,3 +400,23 @@ void im2col() {
   // ref caffe
 }
 void conv() {}
+
+int main() {
+  float a_list[16] = {pow(2, -20), 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5};
+  float b_list[16] = {0, -0.1, 0.2, -0.3, 0.4, -0.5, 0.6, 0.7, 0.8, -0.9, 1, 1.1, 1.2, -1.3, 1.4, 1.5};
+  float c_list[16];
+
+  __half ha_list[16], hb_list[16];
+
+  for (int i = 0; i < 16; i++) {
+    ha_list[i] = __float2half(a_list[i]);
+    hb_list[i] = __float2half(b_list[i]);
+    // std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
+  }
+
+  for (int i = 0; i < 16; i++) {
+    c_list[i] = a_list[i] * b_list[i];
+    float hc = ha_list[i] * hb_list[i];
+    printf("%f %f %f %f\n", c_list[i], hc, c_list[i] - hc, __half2float(__float2half(c_list[i])));
+  }
+}
