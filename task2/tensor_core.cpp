@@ -107,47 +107,52 @@ GPU::GPU() {
   allocated_size_ = 0;
 }
 
-// void GPU::SIM_LDG_INSTR() {
-//   // LDG implementation
-// }
+uint64_t concat(unsigned high, unsigned low) {
+  uint64_t result = high;
+  result = (result << 32) | low;
+  return result;
+}
+
+/**
+ * @brief Load data from global memory to register file
+ * @param E: 1 if the address is 64-bit (load from Ra - Ra+1), 0 if the address is 32-bit (load from Ra)
+ * @param sz: 64 means load 64-bit data, 128 means load 128-bit data
+ * @param Rd: the first destination register (sz = 64 means load to Rd to Rd + 1 registers, sz = 128 means load to Rd to Rd + 3 registers)
+ * @param Ra: the first source register containing the base address
+ * @param IMM: the immediate value that contains the offset
+ */
 void GPU::SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned IMM) {
   // for: warp execution
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; threadIdx++) {
     // LDG implementation
-    unsigned &ra_data = regfile_[Ra * WARP_SIZE_ + threadIdx];
-    unsigned address = ra_data + IMM;
-    unsigned data;
+    unsigned *data_ptr;
     if (E) {
-      // 64-bit address
-      uint64_t *ptr = (uint64_t *)&memory_[address / 4];
-      data = *ptr;
+      unsigned &ra_data_0 = regfile_[Ra * WARP_SIZE_ + threadIdx];
+      unsigned &ra_data_1 = regfile_[(Ra + 1) * WARP_SIZE_ + threadIdx];
+      uint64_t addr = concat(ra_data_1, ra_data_0) + (uint64_t)IMM;
+      data_ptr = &memory_[addr / 4];  // unsigned is 4 bytes
     } else {
-      // 32-bit address
-      uint32_t *ptr = (uint32_t *)&memory_[address / 4];
-      data = *ptr;
+      unsigned &ra_data = regfile_[Ra * WARP_SIZE_ + threadIdx];
+      unsigned addr = ra_data + IMM;
+      data_ptr = &memory_[addr / 4];  // unsigned is 4 bytes
     }
     switch (sz) {
-      case 1:
-        // 8-bit data
-        data &= 0xff;
-        break;
-      case 2:
-        // 16-bit data
-        data &= 0xffff;
-        break;
-      case 3:
-        // 32-bit data
-        data &= 0xffffffff;
-        break;
-      case 4:
+      case 64:
         // 64-bit data
-        data &= 0xffffffffffffffff;
+        regfile_[Rd * WARP_SIZE_ + threadIdx] = *data_ptr;
+        regfile_[(Rd + 1) * WARP_SIZE_ + threadIdx] = *(data_ptr + 1);
+        break;
+      case 128:
+        // 128-bit data
+        regfile_[Rd * WARP_SIZE_ + threadIdx] = *data_ptr;
+        regfile_[(Rd + 1) * WARP_SIZE_ + threadIdx] = *(data_ptr + 1);
+        regfile_[(Rd + 2) * WARP_SIZE_ + threadIdx] = *(data_ptr + 2);
+        regfile_[(Rd + 3) * WARP_SIZE_ + threadIdx] = *(data_ptr + 3);
         break;
     }
-    unsigned &rd_data = regfile_[Rd * WARP_SIZE_ + threadIdx];
-    rd_data = data;
   }
 }
+
 void GPU::SIM_STG_INSTR(unsigned Ra, unsigned Sb, bool E, unsigned imm, unsigned sz) {
   // STG implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; ++threadIdx) {
@@ -236,6 +241,7 @@ void GPU::SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, boo
     if (wide) {
       if (fmt) {
         int64_t data;
+        // TODO: int x int -> 64bit? reg file order?
         data = ((int)ra_data * (int)sb_data) & 0xffffffffffffffff;
         int64_t * sc_data = (int64_t * )&regfile_[Sc * WARP_SIZE_ + threadIdx];
         int64_t * rd_data = (int64_t *)&regfile_[Rd * WARP_SIZE_ + threadIdx];  
@@ -434,21 +440,30 @@ void im2col() {
 void conv() {}
 
 int main() {
-  float a_list[16] = {pow(2, -20), 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5};
-  float b_list[16] = {0, -0.1, 0.2, -0.3, 0.4, -0.5, 0.6, 0.7, 0.8, -0.9, 1, 1.1, 1.2, -1.3, 1.4, 1.5};
-  float c_list[16];
+//   float a_list[16] = {pow(2, -20), 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5};
+//   float b_list[16] = {0, -0.1, 0.2, -0.3, 0.4, -0.5, 0.6, 0.7, 0.8, -0.9, 1, 1.1, 1.2, -1.3, 1.4, 1.5};
+//   float c_list[16];
 
-  __half ha_list[16], hb_list[16];
+//   __half ha_list[16], hb_list[16];
 
-  for (int i = 0; i < 16; i++) {
-    ha_list[i] = __float2half(a_list[i]);
-    hb_list[i] = __float2half(b_list[i]);
-    std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
-  }
+//   for (int i = 0; i < 16; i++) {
+//     ha_list[i] = __float2half(a_list[i]);
+//     hb_list[i] = __float2half(b_list[i]);
+//     std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
+//   }
 
-  for (int i = 0; i < 16; i++) {
-    c_list[i] = a_list[i] * b_list[i];
-    float hc = ha_list[i] * hb_list[i];
-    printf("%f %f %f %f\n", c_list[i], hc, c_list[i] - hc, __half2float(__float2half(c_list[i])));
-  }
+//   for (int i = 0; i < 16; i++) {
+//     c_list[i] = a_list[i] * b_list[i];
+//     float hc = ha_list[i] * hb_list[i];
+//     printf("%f %f %f %f\n", c_list[i], hc, c_list[i] - hc, __half2float(__float2half(c_list[i])));
+//   }
+
+  unsigned a = 0x3f800000;
+  unsigned b = 0x10000001;
+  uint64_t c = concat(a, b);
+  printf("%x\n%x\n%lx\n", a, b, c);
+  printf("%x\n%x\n", (uint64_t)a, (uint64_t)b);
+
+  GPU volta;
+  volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
 }
