@@ -121,7 +121,7 @@ uint64_t concat(unsigned high, unsigned low) {
  * @param Ra: the first source register containing the base address
  * @param IMM: the immediate value that contains the offset
  */
-void GPU::SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned IMM) {
+void GPU::SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned imm) {
   // for: warp execution
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; threadIdx++) {
     // LDG implementation
@@ -129,11 +129,11 @@ void GPU::SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned 
     if (E) {
       unsigned &ra_data_0 = regfile_[Ra * WARP_SIZE_ + threadIdx];
       unsigned &ra_data_1 = regfile_[(Ra + 1) * WARP_SIZE_ + threadIdx];
-      uint64_t addr = concat(ra_data_1, ra_data_0) + (uint64_t)IMM;
+      uint64_t addr = concat(ra_data_1, ra_data_0) + (uint64_t)imm;
       data_ptr = &memory_[addr / 4];  // unsigned is 4 bytes
     } else {
       unsigned &ra_data = regfile_[Ra * WARP_SIZE_ + threadIdx];
-      unsigned addr = ra_data + IMM;
+      unsigned addr = ra_data + imm;
       data_ptr = &memory_[addr / 4];  // unsigned is 4 bytes
     }
     switch (sz) {
@@ -153,37 +153,32 @@ void GPU::SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned 
   }
 }
 
-void GPU::SIM_STG_INSTR(unsigned Ra, unsigned Sb, bool E, unsigned imm, unsigned sz) {
+void GPU::SIM_STG_INSTR(bool E, unsigned sz, unsigned Sb, unsigned Ra, unsigned imm) {
   // STG implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; ++threadIdx) {
-    unsigned & ra_data = regfile_[Ra * WARP_SIZE_ + threadIdx];
-    unsigned & sb_data = regfile_[Sb * WARP_SIZE_ + threadIdx];
-    
-    unsigned data = sb_data;
-    switch (sz) {
-      case 1:
-        // 8-bit data
-        data &= 0xff;
-        break;
-      case 2:
-        // 16-bit data
-        data &= 0xffff;
-        break;
-      case 3:
-        // 32-bit data
-        data &= 0xffffffff;
-        break;
-      case 4:
-        // 64-bit data
-        data &= 0xffffffffffffffff;
-        break;
-    }
+    unsigned * data_ptr;
     if (E) {
-      uint64_t * ptr = (uint64_t *)&memory_[(ra_data + imm) / 4];
-      *ptr = data;
+      unsigned &ra_data_0 = regfile_[Ra * WARP_SIZE_ + threadIdx];
+      unsigned &ra_data_1 = regfile_[(Ra + 1) * WARP_SIZE_ + threadIdx];
+      uint64_t addr = concat(ra_data_1, ra_data_0) + (uint64_t)imm;
+      data_ptr = &memory_[addr / 4];
     } else {
-      uint32_t * ptr = (uint32_t *)&memory_[(ra_data + imm) / 4];
-      *ptr = data;
+      unsigned &ra_data = regfile_[Ra * WARP_SIZE_ + threadIdx];
+      unsigned addr = ra_data + imm;
+      data_ptr = &memory_[addr / 4];
+    }
+
+    switch (sz) {
+      case 64:
+        *(data_ptr) = regfile_[Sb * WARP_SIZE_ + threadIdx];
+        *(data_ptr + 1) = regfile_[(Sb + 1) * WARP_SIZE_ + threadIdx];
+        break;
+      case 128:
+        *(data_ptr) = regfile_[Sb * WARP_SIZE_ + threadIdx];
+        *(data_ptr + 1) = regfile_[(Sb + 1) * WARP_SIZE_ + threadIdx];
+        *(data_ptr + 2) = regfile_[(Sb + 2) * WARP_SIZE_ + threadIdx];
+        *(data_ptr + 3) = regfile_[(Sb + 3) * WARP_SIZE_ + threadIdx];
+        break;
     }
   }
 }
@@ -200,16 +195,16 @@ void GPU::SIM_HMMA_INSTR_STEP3() {
   // HMMA.STEP3 implementation
 }
 
-void GPU::SIM_S2R_INSTR(unsigned Rd, unsigned SR) {
+void GPU::SIM_S2R_INSTR(unsigned Rd, s_reg_t SR) {
   // S2R implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; ++threadIdx) {
     unsigned data = 0;
-    unsigned & sr_data = regfile_[SR * WARP_SIZE_ + threadIdx];
-    switch (sr_data) {
+    switch (SR) {
     case SR_LAINID:
       // SR_LANEID: thread index of the warp
       data = threadIdx;
       break;
+    // The four following cases are not used in this project, so the implementation is fake
     case SR_TID_X:
       // SR_TID.X: threadIdx.x
       data = SR_TID_X;
@@ -327,12 +322,14 @@ void GPU::SIM_SHF_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, bool
   }
 }
 
-void GPU::SIM_CS2R_INSTR(unsigned Rd, unsigned SR) {
+void GPU::SIM_CS2R_INSTR(unsigned Rd, s_reg_t SR) {
   // S2R implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; ++threadIdx) {
-    uint64_t data = 0;
-    regfile_[Rd * WARP_SIZE_ + threadIdx] = data;
-
+    if (SR != SRZ)
+      printf("CS2R error: SR != SRZ\n");
+    // 64-bit 0
+    regfile_[Rd * WARP_SIZE_ + threadIdx] = 0;
+    regfile_[(Rd + 1) * WARP_SIZE_ + threadIdx] = 0;
   }
 }
 
@@ -420,6 +417,15 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   // gridDim & blockDim
   // assume c[0x0][0x28]=0
   const int c_0_28 = 0;
+  // 16 x 16 mma
+
+  // load a, b, c to gpu memory
+  // thread group 0, 2 load a[0:3], 
+  // thread group 4, 6 load a[4:7]
+  // thread group 1, 3 load a[8:11]
+  // thread group 5, 7 load a[12:15]
+  // volta.SIM_LDG_INSTR(1, 128, 2, ((unsigned int)a / 4), 0);
+  // volta.SIM_LDG_INSTR(1, 128)
   // volta.SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, unsigned fmt, bool wide);  // SASS: IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;
   // add instruction you need,sim_imad_instr() is just an example
 }
@@ -466,4 +472,5 @@ int main() {
 
   GPU volta;
   volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
+  volta.SIM_STG_INSTR(1, 64, 0, 0, 0);
 }

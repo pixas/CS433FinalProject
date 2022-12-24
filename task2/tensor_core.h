@@ -39,18 +39,18 @@ extern float operator*(const __half &lh, const __half &rh);
 class GPU {
  public:
   GPU();
-  void SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned IMM);
-  void SIM_STG_INSTR(unsigned Ra, unsigned Sb, bool E, unsigned imm, unsigned sz);
+  void SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned imm);
+  void SIM_STG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned imm);
   void SIM_HMMA_INSTR_STEP0();
   void SIM_HMMA_INSTR_STEP1();
   void SIM_HMMA_INSTR_STEP2();
   void SIM_HMMA_INSTR_STEP3();
-  void SIM_S2R_INSTR(unsigned Rd, unsigned SR);
+  void SIM_S2R_INSTR(unsigned Rd, s_reg_t SR);
   void SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, bool wide, unsigned fmt=1);
   void SIM_LOP3_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc,
                       unsigned imm);
   void SIM_SHF_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, bool dir, bool maxshift, bool HI);
-  void SIM_CS2R_INSTR(unsigned Rd, unsigned SR);
+  void SIM_CS2R_INSTR(unsigned Rd, s_reg_t SR);
   void SIM_LEA_INSTR(bool HI, bool X, unsigned Rd, unsigned Ra, unsigned Sb,
                      unsigned imm, unsigned Pd0 = 7, unsigned Ps0 = 7);
   void SIM_EXIT_INSTR();
