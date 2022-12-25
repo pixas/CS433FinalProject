@@ -1,37 +1,122 @@
 #include "tensor_core.h"
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
+#include <stdlib.h>
+#include <iomanip>
+
+using namespace std;
+void print_hex(uint32_t num) {
+  std::cout << "0x" << std::setw(8) << std::setfill('0') << std::hex << num << std::endl;
+}
+
+void print_reg(GPU& volta, unsigned Rid) {
+  for (int i = 0; i < volta.total_thread(); ++i) {
+    printf("Reg %d T%d: ", Rid, i);
+    // print_binary(volta.reg_content(Rid, i));
+    print_hex(volta.reg_content(Rid, i));
+    // printf(" ");
+  }
+  printf("\n\n");
+} 
+
+void print_reg_val(GPU& volta, unsigned Rid, unsigned bits=16) {
+  for (int i = 0; i < volta.total_thread(); ++i) {
+    printf("Reg %d T%d: ", Rid, i);
+    // print_binary(volta.reg_content(Rid, i));
+    unsigned val1 = volta.reg_content(Rid, i);
+    unsigned val2 = volta.reg_content(Rid + 1, i);
+    uint64_t val = concat(val2, val1);
+    if (bits == 16) {
+      // print half
+      __half* true_val = (__half *)val;
+      printf("%.2f\n", __half2float(*true_val));
+    } else if (bits == 32) {
+      printf("%.4f\n", *(float *)val);
+    }
+    // printf(" ");
+  }
+  printf("\n\n");
+}
+
+void print_load(GPU& volta, unsigned Rid, unsigned bits=16, unsigned sz=128) {
+  for (int i = 0; i < volta.total_thread(); ++i) {
+    printf("Reg %d T%d: ", Rid, i);
+    // print_binary(volta.reg_content(Rid, i));
+    if (sz == 128) {
+      unsigned val1 = volta.reg_content(Rid, i);
+      unsigned val2 = volta.reg_content(Rid + 1, i);
+      unsigned val3 = volta.reg_content(Rid + 2, i);
+      unsigned val4 = volta.reg_content(Rid + 3, i);  
+      for (int shift = 0; shift < 4; ++shift) {
+        unsigned val_shift = volta.reg_content(Rid + shift, i);
+        __half val_1((unsigned short)(val_shift >> 16));
+        __half val_0((unsigned short)(val_shift & 0xffff));
+        printf("%.2f %.2f ", __half2float(val_0), __half2float(val_1));
+        
+      }
+      printf("\n");
+    }
+    // unsigned val1 = volta.reg_content(Rid, i);
+    // unsigned val2 = volta.reg_content(Rid + 1, i);
+    // uint64_t val = concat(val2, val1);
+    // if (bits == 16) {
+    //   // print half
+    //   __half* true_val = (__half *)val;
+    //   printf("%.2f\n", __half2float(*true_val));
+    // } else if (bits == 32) {
+    //   printf("%.4f\n", *(float *)val);
+    // }
+    // printf(" ");
+  }
+  printf("\n\n");
+}
 
 __half __float2half(const float &a) {
   uint32_t bits = *(uint32_t*)&a;
-  int sign = (bits >> 31) & 1;
+  int sign = (bits >> 31) & 0x1;
   int exponent = (bits >> 23) & 0xff;
-  int mantissa = bits & 0x7fffff;
+  int mantissa = bits & 0x007fffff;
   __half result;
   if (exponent == 0) {
-    // Denormalized number
-    result.setX((unsigned short)((sign << 15) | (int)(mantissa / pow(2, -14))));
-    return result;
+    // Denormalized number --> Underflow
+    exponent = mantissa = 0;
   } else if (exponent == 0xff) {
     // Inf or NaN
-    result.setX((unsigned short)((sign << 15) | (0x1f << 10) | (mantissa ? 0x200 : 0)));
-    return result;
+    exponent = 0x1f;
+    mantissa = mantissa ? 0x200 : 0;
   } else {
     // Normalized number
-    exponent = exponent - 127 + 15;
-    if (exponent >= 0x1f) {
+    if (exponent - 127 > 15) {
       // Overflow
       exponent = 0x1f;
       mantissa = 0;
-    } else if (exponent <= 0) {
+    } else if (exponent - 127 >= -14) {
+      // Normalized float -> normalized half, true exp in range [-14, 15], exp in range [113, 142]
+      // exp - 127 + 15 = exp - 112
+      exponent = exponent - 112;
+      mantissa = (mantissa >> 13) & 0x3ff;
+    } else if (exponent - 127 >= -24) {
+      // Normalized float -> denormalized half, true exp in range [-24, -15], exp in range [103, 112]
+      // exp - 103 = exp - 127 + 24, 126 - exp = -exp - 1 + 127
+      mantissa = ((1 << (exponent - 103)) + (mantissa >> (126 - exponent))) & 0x3ff;
+      exponent = 0;
+    } else {
       // Underflow
       exponent = mantissa = 0;
-    } else {
-      mantissa = mantissa >> 13;
     }
-    result.setX((unsigned short)((sign << 15) | (exponent << 10) | mantissa));
-    return result;
   }
+  result.setX((unsigned short)((sign << 15) | (exponent << 10) | mantissa));
+  return result;
+}
+
+void print_binary(uint32_t bits) {
+  char binary[33];
+  for (int i = 0; i < 32; ++i) {
+    binary[31 - i] = (bits & (1 << i)) ? '1' : '0';
+  }
+  binary[32] = '\0';
+  printf("%s\n", binary);
 }
 
 float __half2float(const __half &a) {
@@ -39,153 +124,145 @@ float __half2float(const __half &a) {
   int sign = (bits >> 15) & 1;
   int exponent = (bits >> 10) & 0x1f;
   int mantissa = bits & 0x3ff;
+  int result;
   if (exponent == 0) {
     // Denormalized number
-    return (float)(pow(-1, sign) * pow(2, -14) * (mantissa / pow(2, 10)));
+    // return (float)(pow(-1, sign) * pow(2, -14) * (mantissa / pow(2, 10)));
+    int highest_bit = 0;
+    int temp = mantissa;
+    while (temp) {
+      ++highest_bit;
+      temp >>= 1;
+    }
+    // exponent = - 14 - (11 - highest_bit) + 127;
+    exponent = 102 + highest_bit;
+    mantissa = ((1 << (exponent - 103)) + (mantissa >> (126 - exponent))) & 0x7fffff;
   } else if (exponent == 0x1f) {
     // Inf or NaN
-    return (float)((exponent == 0x1f && mantissa == 0) ? pow(-1, sign) * INFINITY : NAN);
+    // return (float)((exponent == 0x1f && mantissa == 0) ? pow(-1, sign) * INFINITY : NAN);
+    exponent = 0xff;
+    mantissa = mantissa ? 0x400000 : 0x0;
   } else {
     // Normalized number
-    return (float)(pow(-1, sign) * pow(2, exponent - 15) * (1 + mantissa / pow(2, 10)));
+    // return (float)(pow(-1, sign) * pow(2, exponent - 15) * (1 + mantissa / pow(2, 10)));
+    // exp_f - 127 = exp_h - 15, exp_f = exp_h + 112
+    exponent = exponent + 112;
+    mantissa = mantissa << 13;
   }
+  result = (sign << 31) | (exponent << 23) | mantissa;
+  return *reinterpret_cast<float*>(&result);
 }
 
 float operator*(const __half &lh, const __half &rh) {
-  uint16_t bits_a = lh.getX();
-  uint16_t bits_b = rh.getX();
-  int sign_a = (bits_a >> 15) & 1;
-  int exponent_a = (bits_a >> 10) & 0x1f;
-  int mantissa_a = bits_a & 0x3ff;
-  int sign_b = (bits_b >> 15) & 1;
-  int exponent_b = (bits_b >> 10) & 0x1f;
-  int mantissa_b = bits_b & 0x3ff;
-  int sign = sign_a ^ sign_b;
-  int exponent = exponent_a + exponent_b - 15;
-  int mantissa = mantissa_a * mantissa_b;
-  if (exponent_a == 0) {
-    // a is denormalized
-    exponent_a -= 14;
-    mantissa_a <<= 10;
-  } else {
-    mantissa_a += 0x400;
-  }
-  if (exponent_b == 0) {
-    // b is denormalized
-    exponent_b -= 14;
-    mantissa_b <<= 10;
-  } else {
-    mantissa_b += 0x400;
-  }
-  exponent += exponent_a + exponent_b - 15;
-  if (exponent > 30) {
-    // Overflow
-    return INFINITY;
-  } else if (exponent <= 0) {
-    // Underflow
-    return 0.0;
-  } else {
-    mantissa = (mantissa_a * mantissa_b + 0x200) >> 10;
-    if (mantissa & 0x400) {
-      // Rounding
-      mantissa += 0x400;
-      exponent += 1;
-    }
-    if (exponent >= 0x1f) {
-      // Overflow
-      return INFINITY;
-    } else {
-      return (float)((sign << 15) | (exponent << 10) | (mantissa & 0x3ff));
-    }
-  }
+  float a = __half2float(lh);
+  float b = __half2float(rh);
+  return a * b;
 }
 
 GPU::GPU() {
   // Initialize GPU resources reasonably, including regfile size and global
   // memory size, assuming sm=1 and warp_num=1
-  constexpr unsigned MEMORY_SIZE = 1024 * 1024* 1024;  // 1 GB
+  constexpr unsigned MEMORY_SIZE = 1024 * 1024 * 1024;  // 1 GB
   memory_ = new unsigned[MEMORY_SIZE];
   memory_size_ = MEMORY_SIZE;
   // Initialize the register file and pre-register file
-  unsigned REGFILE_SIZE = WARP_SIZE_ * 255;
+  unsigned REGFILE_SIZE = WARP_SIZE_ * 256;
   regfile_ = new unsigned[REGFILE_SIZE];
+  for (int i = 0; i < WARP_SIZE_; ++i) {
+    regfile_[255 * WARP_SIZE_ + i] = 0;
+  }
   unsigned PREGFILE_SIZE = WARP_SIZE_ * 7;
   pregfile_ = new bool[PREGFILE_SIZE];
   allocated_size_ = 0;
 }
 
-// void GPU::SIM_LDG_INSTR() {
-//   // LDG implementation
-// }
-void GPU::SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned IMM) {
+uint64_t concat(unsigned high, unsigned low) {
+  uint64_t result = high;
+  result = (result << 32) | low;
+  return result;
+}
+
+void split(uint64_t data, unsigned &high, unsigned &low) {
+  high = data >> 32;
+  low = data & 0xffffffff;
+}
+
+/**
+ * @brief Load data from global memory to register file
+ * @param E: 1 if the address is 64-bit (load from Ra - Ra+1), 0 if the address is 32-bit (load from Ra)
+ * @param sz: 64 means load 64-bit data, 128 means load 128-bit data
+ * @param Rd: the first destination register (sz = 64 means load to Rd to Rd + 1 registers, sz = 128 means load to Rd to Rd + 3 registers)
+ * @param Ra: the first source register containing the base address
+ * @param imm: the immediate value that contains the offset
+ */
+void GPU::SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned imm) {
   // for: warp execution
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; threadIdx++) {
     // LDG implementation
-    unsigned &ra_data = regfile_[Ra * WARP_SIZE_ + threadIdx];
-    unsigned address = ra_data + IMM;
-    unsigned data;
+    unsigned *data_ptr;
     if (E) {
-      // 64-bit address
-      uint64_t *ptr = (uint64_t *)&memory_[address / 4];
-      data = *ptr;
+      unsigned &ra_data_0 = regfile_[Ra * WARP_SIZE_ + threadIdx];
+      unsigned &ra_data_1 = regfile_[(Ra + 1) * WARP_SIZE_ + threadIdx];
+      uint64_t addr = concat(ra_data_1, ra_data_0) + (uint64_t)imm;
+      // data_ptr = &memory_[addr / 4];  // unsigned is 4 bytes
+      data_ptr = (unsigned *)addr;
     } else {
-      // 32-bit address
-      uint32_t *ptr = (uint32_t *)&memory_[address / 4];
-      data = *ptr;
+      unsigned &ra_data = regfile_[Ra * WARP_SIZE_ + threadIdx];
+      unsigned addr = ra_data + imm;
+      // data_ptr = &memory_[addr / 4];  // unsigned is 4 bytes
+      data_ptr = (unsigned *)addr;
     }
     switch (sz) {
-      case 1:
-        // 8-bit data
-        data &= 0xff;
-        break;
-      case 2:
-        // 16-bit data
-        data &= 0xffff;
-        break;
-      case 3:
-        // 32-bit data
-        data &= 0xffffffff;
-        break;
-      case 4:
+      case 64:
         // 64-bit data
-        data &= 0xffffffffffffffff;
+        regfile_[Rd * WARP_SIZE_ + threadIdx] = *data_ptr;
+        regfile_[(Rd + 1) * WARP_SIZE_ + threadIdx] = *(data_ptr + 1);
+        break;
+      case 128:
+        // 128-bit data
+        regfile_[Rd * WARP_SIZE_ + threadIdx] = *data_ptr;
+        regfile_[(Rd + 1) * WARP_SIZE_ + threadIdx] = *(data_ptr + 1);
+        regfile_[(Rd + 2) * WARP_SIZE_ + threadIdx] = *(data_ptr + 2);
+        regfile_[(Rd + 3) * WARP_SIZE_ + threadIdx] = *(data_ptr + 3);
         break;
     }
-    unsigned &rd_data = regfile_[Rd * WARP_SIZE_ + threadIdx];
-    rd_data = data;
   }
 }
-void GPU::SIM_STG_INSTR(unsigned Ra, unsigned Sb, bool E, unsigned imm, unsigned sz) {
+
+/**
+ * @brief Store data from register file to global memory
+ * @param E: 1 if the address is 64-bit (load from Ra - Ra+1), 0 if the address is 32-bit (load from Ra)
+ * @param sz: 64 means load 64-bit data, 128 means load 128-bit data
+ * @param Sb: the first source register (sz = 64 means store data from Rd to Rd + 1 registers, sz = 128 means store data from Rd to Rd + 3 registers)
+ * @param Ra: the first source register containing the base address
+ * @param imm: the immediate value that contains the offset
+ */
+void GPU::SIM_STG_INSTR(bool E, unsigned sz, unsigned Sb, unsigned Ra, unsigned imm) {
   // STG implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; ++threadIdx) {
-    unsigned & ra_data = regfile_[Ra * WARP_SIZE_ + threadIdx];
-    unsigned & sb_data = regfile_[Sb * WARP_SIZE_ + threadIdx];
-    
-    unsigned data = sb_data;
-    switch (sz) {
-      case 1:
-        // 8-bit data
-        data &= 0xff;
-        break;
-      case 2:
-        // 16-bit data
-        data &= 0xffff;
-        break;
-      case 3:
-        // 32-bit data
-        data &= 0xffffffff;
-        break;
-      case 4:
-        // 64-bit data
-        data &= 0xffffffffffffffff;
-        break;
-    }
+    unsigned * data_ptr;
     if (E) {
-      uint64_t * ptr = (uint64_t *)&memory_[(ra_data + imm) / 4];
-      *ptr = data;
+      unsigned &ra_data_0 = regfile_[Ra * WARP_SIZE_ + threadIdx];
+      unsigned &ra_data_1 = regfile_[(Ra + 1) * WARP_SIZE_ + threadIdx];
+      uint64_t addr = concat(ra_data_1, ra_data_0) + (uint64_t)imm;
+      data_ptr = &memory_[addr / 4];
     } else {
-      uint32_t * ptr = (uint32_t *)&memory_[(ra_data + imm) / 4];
-      *ptr = data;
+      unsigned &ra_data = regfile_[Ra * WARP_SIZE_ + threadIdx];
+      unsigned addr = ra_data + imm;
+      data_ptr = &memory_[addr / 4];
+    }
+
+    switch (sz) {
+      case 64:
+        *(data_ptr) = regfile_[Sb * WARP_SIZE_ + threadIdx];
+        *(data_ptr + 1) = regfile_[(Sb + 1) * WARP_SIZE_ + threadIdx];
+        break;
+      case 128:
+        *(data_ptr) = regfile_[Sb * WARP_SIZE_ + threadIdx];
+        *(data_ptr + 1) = regfile_[(Sb + 1) * WARP_SIZE_ + threadIdx];
+        *(data_ptr + 2) = regfile_[(Sb + 2) * WARP_SIZE_ + threadIdx];
+        *(data_ptr + 3) = regfile_[(Sb + 3) * WARP_SIZE_ + threadIdx];
+        break;
     }
   }
 }
@@ -202,16 +279,21 @@ void GPU::SIM_HMMA_INSTR_STEP3() {
   // HMMA.STEP3 implementation
 }
 
-void GPU::SIM_S2R_INSTR(unsigned Rd, unsigned SR) {
+/**
+ * @brief S2R instruction
+ * @param Rd: the destination register
+ * @param SR: store data type
+ */
+void GPU::SIM_S2R_INSTR(unsigned Rd, s_reg_t SR) {
   // S2R implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; ++threadIdx) {
     unsigned data = 0;
-    unsigned & sr_data = regfile_[SR * WARP_SIZE_ + threadIdx];
-    switch (sr_data) {
+    switch (SR) {
     case SR_LAINID:
       // SR_LANEID: thread index of the warp
       data = threadIdx;
       break;
+    // The four following cases are not used in this project, so the implementation is fake
     case SR_TID_X:
       // SR_TID.X: threadIdx.x
       data = SR_TID_X;
@@ -235,6 +317,16 @@ void GPU::SIM_S2R_INSTR(unsigned Rd, unsigned SR) {
     regfile_[Rd * WARP_SIZE_ + threadIdx] = data;
   }
 }
+
+/**
+ * @brief IMAD instruction
+ * @param Rd: the first destination register
+ * @param Ra: the source register for multiplication
+ * @param Sb: the source register for multiplication
+ * @param Sc: the source register for addition
+ * @param wide: 1 if the data is 64-bit, 0 if the data is 32-bit
+ * @param fmt: 1 if the data is signed, 0 if the data is unsigned
+ */
 void GPU::SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, bool wide, unsigned fmt) {
   // IMAD implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; threadIdx++) {
@@ -243,47 +335,49 @@ void GPU::SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, boo
     if (wide) {
       if (fmt) {
         int64_t data;
-        data = ((int)ra_data * (int)sb_data) & 0xffffffffffffffff;
-        
-        int64_t sc_data = ((int64_t )regfile_[Sc * WARP_SIZE_ + threadIdx]) | (((int64_t )regfile_[(Sc + 1) * WARP_SIZE_ + threadIdx]) << 32);
-        regfile_[Rd * WARP_SIZE_ + threadIdx] = (unsigned)(sc_data & 0xffffffff);
-        regfile_[(Rd+1) * WARP_SIZE_ + threadIdx] = (unsigned)(sc_data >> 32);
-        // int64_t & rd_data = (int64_t *)&regfile_[Rd * WARP_SIZE_ + threadIdx];  
-        // *rd_data = data + (sc_data);
+        data = ((int64_t)ra_data * (int64_t)sb_data) & 0xffffffffffffffff;
+        unsigned &sc_data_0 = regfile_[Sc * WARP_SIZE_ + threadIdx];
+        unsigned &sc_data_1 = regfile_[(Sc + 1) * WARP_SIZE_ + threadIdx];
+        int64_t sc_data = concat(sc_data_1, sc_data_0);
+        int64_t rd_data = data + sc_data;
+
+        unsigned &rd_data_0 = regfile_[Rd * WARP_SIZE_ + threadIdx];
+        unsigned &rd_data_1 = regfile_[(Rd + 1) * WARP_SIZE_ + threadIdx];
+        split((uint64_t)rd_data, rd_data_1, rd_data_0);
       } else {
-        // uint64_t data;
-        // data = (ra_data * sb_data) & 0xffffffffffffffff;
-        // uint64_t * sc_data = (uint64_t*)&regfile_[Sc * WARP_SIZE_ + threadIdx];
-        // uint64_t * rd_data = (uint64_t *)&regfile_[Rd * WARP_SIZE_ + threadIdx];
-        // *rd_data = data + (*sc_data);
         uint64_t data;
-        data = (ra_data * sb_data) & 0xffffffffffffffff;
-        
-        uint64_t sc_data = ((uint64_t )regfile_[Sc * WARP_SIZE_ + threadIdx]) | (((uint64_t )regfile_[(Sc + 1) * WARP_SIZE_ + threadIdx]) << 32);
-        regfile_[Rd * WARP_SIZE_ + threadIdx] = (unsigned)(sc_data & 0xffffffff);
-        regfile_[(Rd+1) * WARP_SIZE_ + threadIdx] = (unsigned)(sc_data >> 32);
+        data = ((uint64_t)ra_data * (uint64_t)sb_data) & 0xffffffffffffffff;
+        unsigned &sc_data_0 = regfile_[Sc * WARP_SIZE_ + threadIdx];
+        unsigned &sc_data_1 = regfile_[(Sc + 1) * WARP_SIZE_ + threadIdx];
+        uint64_t sc_data = concat(sc_data_1, sc_data_0);
+        uint64_t rd_data = data + sc_data;
+
+        unsigned &rd_data_0 = regfile_[Rd * WARP_SIZE_ + threadIdx];
+        unsigned &rd_data_1 = regfile_[(Rd + 1) * WARP_SIZE_ + threadIdx];
+        split(rd_data, rd_data_1, rd_data_0);
       }
     } else {
       if (fmt) {
         int data;
         data = ((int)ra_data * (int)sb_data) & 0xffffffff;
-        int * sc_data = (int * )&regfile_[Sc * WARP_SIZE_ + threadIdx];
-        int * rd_data = (int *)&regfile_[Rd * WARP_SIZE_ + threadIdx];  
-        *rd_data = data + (*sc_data);
+        int sc_data = (int)regfile_[Sc * WARP_SIZE_ + threadIdx];
+        regfile_[Rd * WARP_SIZE_ + threadIdx] = data + sc_data;
       } else {
         unsigned data;
-        data = (ra_data * sb_data) & 0xffffffff;
-        unsigned * sc_data = (unsigned*)&regfile_[Sc * WARP_SIZE_ + threadIdx];
-        unsigned * rd_data = (unsigned *)&regfile_[Rd * WARP_SIZE_ + threadIdx];
-        *rd_data = data + (*sc_data);
+        data = ((unsigned)ra_data * (unsigned)sb_data) & 0xffffffff;
+        
+        unsigned &sc_data = regfile_[Sc * WARP_SIZE_ + threadIdx];
+        regfile_[Rd * WARP_SIZE_ + threadIdx] = data + sc_data;
+        // printf("%d\n", regfile_[Rd * WARP_SIZE_ + threadIdx]);
       }
-
     }
   }
 }
 
-void GPU::SIM_LOP3_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc,
-                         unsigned imm) {
+void GPU::SIM_LOP3_INSTR(
+  unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc,
+  unsigned imm
+) {
   // for: warp execuation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; threadIdx++) {
     // LOP3 implementation
@@ -303,16 +397,25 @@ void GPU::SIM_LOP3_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc,
   }
 }
 
-
+/**
+ * @brief SHF instruction
+ * @param Rd: the destination register
+ * @param Ra: the register containing the low 32 bits of the value to be shifed
+ * @param Sb: the register containing the shift bits
+ * @param Sc: the register containing the high 32 bits of the value to be shifed
+ * @param dir: the direction of the shift (0: left, 1: right)
+ * @param maxshift: logical shift (1) or arithmetic shift (0)
+ * @param HI: shift bits plus 32 (1) or not (0)
+ */
 void GPU::SIM_SHF_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, bool dir, bool maxshift, bool HI) {
   // SHF implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; threadIdx++) {
     unsigned & ra_data = regfile_[Ra * WARP_SIZE_ + threadIdx];
     unsigned & sc_data = regfile_[Sc * WARP_SIZE_ + threadIdx];
     unsigned & sb_data = regfile_[Sb * WARP_SIZE_ + threadIdx];
-    unsigned val = (sc_data << 32) | ra_data;
+    uint64_t val = concat(sc_data, ra_data);
     unsigned shift = HI ? (sb_data + 32) : sb_data;
-    unsigned data;
+    uint64_t data;
     if (maxshift) {
       // logical shift
       if (dir) {
@@ -325,22 +428,35 @@ void GPU::SIM_SHF_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, bool
     } else {
       // arithmetic shift
       if (dir) {
-        data = (int)val >> shift;
+        data = (int64_t)val >> shift;
       }
       else {
-        data = (int)val << shift;
+        data = (int64_t)val << shift;
       }
     }
     regfile_[Rd * WARP_SIZE_ + threadIdx] = (data & 0xffffffff);
   }
 }
 
-void GPU::SIM_CS2R_INSTR(unsigned Rd, unsigned SR) {
+/**
+ * @brief CS2R instruction
+ * @param Rd: the destination register
+ * @param SR: store data type (SRZ)
+ */
+void GPU::SIM_CS2R_INSTR(unsigned Rd, s_reg_t SR) {
   // S2R implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; ++threadIdx) {
-    uint64_t data = 0;
-    regfile_[Rd * WARP_SIZE_ + threadIdx] = data;
+    if (SR != SRZ)
+      printf("CS2R error: SR != SRZ\n");
+    // 64-bit 0
+    regfile_[Rd * WARP_SIZE_ + threadIdx] = 0;
+    regfile_[(Rd + 1) * WARP_SIZE_ + threadIdx] = 0;
+  }
+}
 
+void GPU::SIM_MOV_INSTR(unsigned Rd, unsigned Sc) {
+  for (int threadIdx = 0; threadIdx < WARP_SIZE_; ++threadIdx) {
+    regfile_[Rd * WARP_SIZE_ + threadIdx] = Sc;
   }
 }
 
@@ -394,28 +510,33 @@ void simMalloc(void **ptr, size_t size, GPU &volta) {
   volta.allocated_size_ += size;
 }
 
+inline int check_in_GPU(void *ptr, size_t count, GPU &volta) {
+  // Check that the whole memory block is within the bounds of the GPU memory
+  if (
+    (unsigned char*)ptr >= (unsigned char*)(volta.memory_) &&
+    (unsigned char*)ptr + count <= (unsigned char*)(volta.memory_ + volta.memory_size_)
+  )
+    return 1;
+  return 0;
+}
+
 void simMemcpy(void *dst, void *src, size_t count, enum cudaMemcpyKind kind,
                GPU &volta) {
   // sim cudaMemcpy
   // memcpy host memory to class GPU memory or
   // memcpy class GPU memory to host memory
   // Check that the destination and source pointers are within the bounds of the GPU memory
-  if ((kind == MemcpyHostToDevice && (unsigned char*)dst < (unsigned  char*)(volta.memory_ + volta.memory_size_)) ||
-      (kind == MemcpyDeviceToHost && (unsigned char*)src < (unsigned  char*)(volta.memory_ + volta.memory_size_))) {
+  if (
+    (kind == MemcpyHostToDevice && check_in_GPU(dst, count, volta)) ||
+    (kind == MemcpyDeviceToHost && check_in_GPU(src, count, volta))
+  ) {
+    // Copy memory between the host and the GPU
+    memcpy(dst, src, count);
+  } else {
     // Invalid destination or source pointer, throw an exception or return an error code
     throw std::invalid_argument("Invalid memory address");
   }
 
-  // Copy memory between the host and the GPU
-  unsigned char *dst_ptr = (unsigned char*)dst;
-  unsigned char *src_ptr = (unsigned char*)src;
-  if (kind == MemcpyHostToDevice) {
-    // Copy from host to device
-    memcpy(dst_ptr, src_ptr, count);
-  } else {
-    // Copy from device to host
-    memcpy(dst_ptr, src_ptr, count);
-  }
 }
 
 void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
@@ -423,7 +544,83 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   // device kernel function
   // gridDim & blockDim
   // assume c[0x0][0x28]=0
-  const int c_0_28 = 0;
+  const unsigned int c_0_28 = 0;
+  const uint64_t c_0_160 = (uint64_t) a;
+  cout << c_0_160 << endl;
+  cout << __half2float(*(__half *)c_0_160) << endl;
+  // cout << __half2float(*((__half *)c_0_160 + 1)) << endl;
+  const uint64_t c_0_168 = (uint64_t) b;
+  const uint64_t c_0_170 = (uint64_t) c;
+  const uint64_t c_0_178 = (uint64_t) d;
+  // // volta.SIM_IMAD_INSTR(1, 255, 255, c_0_28, 0, 0);
+  volta.SIM_S2R_INSTR(24, SR_LAINID);
+  // print_reg(volta, 24);
+  volta.SIM_MOV_INSTR(1, 0x10);
+  volta.SIM_IMAD_INSTR(13, 255, 255, 1, 0, 0);
+
+  volta.SIM_MOV_INSTR(1, 0x2);
+
+  volta.SIM_SHF_INSTR(23, 255, 1, 24, 1, 1, 1);
+  // print_reg(volta, 23);
+  volta.SIM_MOV_INSTR(1, 0x4);
+  volta.SIM_SHF_INSTR(22, 0, 1, 24, 1, 1, 1);
+  // print_reg(volta, 22);
+  // volta.SIM_MOV_INSTR(2, 0xc0);
+  volta.SIM_MOV_INSTR(1, 0x3);
+  volta.SIM_LOP3_INSTR(23, 23, 1, 255, 0xc0);
+  // print_reg(volta, 23);
+  volta.SIM_LOP3_INSTR(24, 24, 1, 255, 0xc0);
+  // print_reg(volta, 24);
+  volta.SIM_MOV_INSTR(1, 0x1);
+  volta.SIM_LOP3_INSTR(3, 22, 1, 255, 0xc0);
+  // print_reg(volta, 3);
+  volta.SIM_MOV_INSTR(1, 0x8);
+  // print_reg(volta, 23);
+  volta.SIM_IMAD_INSTR(5, 23, 1, 255, 0, 0);
+  volta.SIM_MOV_INSTR(1, 0x1);
+  volta.SIM_SHF_INSTR(0, 255, 1, 23, 1, 1, 1);
+  // print_reg(volta, 0);
+  volta.SIM_MOV_INSTR(1, 0x8);
+  volta.SIM_LOP3_INSTR(2, 5, 1, 24, 0xe2);
+  // print_reg(volta, 2);
+  volta.SIM_MOV_INSTR(1, 0x2);
+  volta.SIM_IMAD_INSTR(4, 0, 1, 3, 0);
+  // print_reg(volta, 4);
+  volta.SIM_MOV_INSTR(1, 0x4);
+  volta.SIM_IMAD_INSTR(3, 3, 1, 2, 0);
+  // print_reg(volta, 3);
+  volta.SIM_IMAD_INSTR(2, 4, 1, 255, 0, 0);
+  // print_reg(volta, 2);
+  volta.SIM_MOV_INSTR(1, 0x2);
+  volta.SIM_IMAD_INSTR(12, 3, 1, 255, 0, 0);
+  // print_reg(volta, 12);
+  volta.SIM_IMAD_INSTR(3, 255, 255, 255, 0, 0);
+  // print_reg(volta, 3);
+  // store the address of a to some register, assume to be 100-101
+  volta.SIM_MOV_INSTR(100, (unsigned)(c_0_160 & 0xffffffff));
+  volta.SIM_MOV_INSTR(101, (unsigned)(c_0_160 >> 32));
+  volta.SIM_IMAD_INSTR(12, 12, 13, 100, 1, 0);
+  // print_reg(volta, 12);
+  // print_reg_val(volta, 12);
+  volta.SIM_MOV_INSTR(1, 0x10);
+  volta.SIM_IMAD_INSTR(2, 24, 1, 2, 1, 0);
+  // print_reg(volta, 2);
+  volta.SIM_LDG_INSTR(1, 128, 16, 12, 0);
+  // print_reg(volta, 16);
+  print_load(volta, 16);
+  
+  // volta.SIM_LEA_INSTR()
+
+  // print_reg_val(volta, 16);
+  // 16 x 16 mma
+
+  // load a, b, c to gpu memory
+  // thread group 0, 2 load a[0:3], 
+  // thread group 4, 6 load a[4:7]
+  // thread group 1, 3 load a[8:11]
+  // thread group 5, 7 load a[12:15]
+  // volta.SIM_LDG_INSTR(1, 128, 2, ((unsigned int)a / 4), 0);
+  // volta.SIM_LDG_INSTR(1, 128)
   // volta.SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, unsigned fmt, bool wide);  // SASS: IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;
   // add instruction you need,sim_imad_instr() is just an example
 }
@@ -442,3 +639,54 @@ void im2col() {
   // ref caffe
 }
 void conv() {}
+
+int main() {
+//   float a_list[16] = {pow(2, -20), 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5};
+//   float b_list[16] = {0, -0.1, 0.2, -0.3, 0.4, -0.5, 0.6, 0.7, 0.8, -0.9, 1, 1.1, 1.2, -1.3, 1.4, 1.5};
+//   float c_list[16];
+
+//   __half ha_list[16], hb_list[16];
+
+//   for (int i = 0; i < 16; i++) {
+//     ha_list[i] = __float2half(a_list[i]);
+//     hb_list[i] = __float2half(b_list[i]);
+//     std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
+//   }
+
+//   for (int i = 0; i < 16; i++) {
+//     c_list[i] = a_list[i] * b_list[i];
+//     float hc = ha_list[i] * hb_list[i];
+//     printf("%f %f %f %f\n", c_list[i], hc, c_list[i] - hc, __half2float(__float2half(c_list[i])));
+//   }
+  vector<__half> a(16 * 16), b(16 * 16);
+  vector<float> c(16 * 16);
+  for (int i = 0; i < 16; i++) {
+    for (int j = 0; j < 16; j++) {
+      a[i * 16 + j] = __float2half(i * 16 + j);
+      b[i * 16 + j] = __float2half(- i * 16 - j);
+    }
+  }
+  int size = 16 * 16;
+  __half *d_a, *d_b;
+  float* d_c;
+  float * d_d;
+  GPU volta;
+  simMalloc((void**)(&d_a), sizeof(__half) * size, volta);
+  simMalloc((void**)(&d_b), sizeof(__half) * size, volta);
+  simMalloc((void**)(&d_c), sizeof(float) * size, volta);
+  simMalloc((void**)(&d_d), sizeof(float) * size, volta);
+  simMemcpy(d_a, a.data(), sizeof(__half) * size, MemcpyHostToDevice, volta);
+  simMemcpy(d_b, b.data(), sizeof(__half) * size, MemcpyHostToDevice, volta);
+  dim3 grid = {1, 1, 1};
+  dim3 block = {1, 1, 1};
+  wmma_kernel(d_a, d_b, d_c, d_d, grid, block, volta);
+
+  // unsigned a = 0x3f800000;
+  // unsigned b = 0x10000001;
+  // uint64_t c = concat(a, b);
+  // printf("%x\n%x\n%lx\n", a, b, c);
+  // printf("%x\n%x\n", (uint64_t)a, (uint64_t)b);
+
+  // volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
+  // volta.SIM_STG_INSTR(1, 64, 0, 0, 0);
+}
