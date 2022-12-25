@@ -119,7 +119,7 @@ uint64_t concat(unsigned high, unsigned low) {
  * @param sz: 64 means load 64-bit data, 128 means load 128-bit data
  * @param Rd: the first destination register (sz = 64 means load to Rd to Rd + 1 registers, sz = 128 means load to Rd to Rd + 3 registers)
  * @param Ra: the first source register containing the base address
- * @param IMM: the immediate value that contains the offset
+ * @param imm: the immediate value that contains the offset
  */
 void GPU::SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned imm) {
   // for: warp execution
@@ -153,6 +153,14 @@ void GPU::SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned 
   }
 }
 
+/**
+ * @brief Store data from register file to global memory
+ * @param E: 1 if the address is 64-bit (load from Ra - Ra+1), 0 if the address is 32-bit (load from Ra)
+ * @param sz: 64 means load 64-bit data, 128 means load 128-bit data
+ * @param Sb: the first source register (sz = 64 means store data from Rd to Rd + 1 registers, sz = 128 means store data from Rd to Rd + 3 registers)
+ * @param Ra: the first source register containing the base address
+ * @param imm: the immediate value that contains the offset
+ */
 void GPU::SIM_STG_INSTR(bool E, unsigned sz, unsigned Sb, unsigned Ra, unsigned imm) {
   // STG implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; ++threadIdx) {
@@ -195,6 +203,11 @@ void GPU::SIM_HMMA_INSTR_STEP3() {
   // HMMA.STEP3 implementation
 }
 
+/**
+ * @brief S2R instruction
+ * @param Rd: the destination register
+ * @param SR: store data type
+ */
 void GPU::SIM_S2R_INSTR(unsigned Rd, s_reg_t SR) {
   // S2R implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; ++threadIdx) {
@@ -228,6 +241,7 @@ void GPU::SIM_S2R_INSTR(unsigned Rd, s_reg_t SR) {
     regfile_[Rd * WARP_SIZE_ + threadIdx] = data;
   }
 }
+
 void GPU::SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, bool wide, unsigned fmt) {
   // IMAD implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; threadIdx++) {
@@ -290,16 +304,25 @@ void GPU::SIM_LOP3_INSTR(
   }
 }
 
-
+/**
+ * @brief SHF instruction
+ * @param Rd: the destination register
+ * @param Ra: the register containing the low 32 bits of the value to be shifed
+ * @param Sb: the register containing the shift bits
+ * @param Sc: the register containing the high 32 bits of the value to be shifed
+ * @param dir: the direction of the shift (0: left, 1: right)
+ * @param maxshift: logical shift (1) or arithmetic shift (0)
+ * @param HI: shift bits plus 32 (1) or not (0)
+ */
 void GPU::SIM_SHF_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, bool dir, bool maxshift, bool HI) {
   // SHF implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; threadIdx++) {
     unsigned & ra_data = regfile_[Ra * WARP_SIZE_ + threadIdx];
     unsigned & sc_data = regfile_[Sc * WARP_SIZE_ + threadIdx];
     unsigned & sb_data = regfile_[Sb * WARP_SIZE_ + threadIdx];
-    unsigned val = (sc_data << 32) | ra_data;
+    uint64_t val = concat(sc_data, ra_data);
     unsigned shift = HI ? (sb_data + 32) : sb_data;
-    unsigned data;
+    uint64_t data;
     if (maxshift) {
       // logical shift
       if (dir) {
@@ -312,16 +335,21 @@ void GPU::SIM_SHF_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, bool
     } else {
       // arithmetic shift
       if (dir) {
-        data = (int)val >> shift;
+        data = (int64_t)val >> shift;
       }
       else {
-        data = (int)val << shift;
+        data = (int64_t)val << shift;
       }
     }
     regfile_[Rd * WARP_SIZE_ + threadIdx] = (data & 0xffffffff);
   }
 }
 
+/**
+ * @brief CS2R instruction
+ * @param Rd: the destination register
+ * @param SR: store data type (SRZ)
+ */
 void GPU::SIM_CS2R_INSTR(unsigned Rd, s_reg_t SR) {
   // S2R implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; ++threadIdx) {
@@ -464,13 +492,14 @@ int main() {
 //     printf("%f %f %f %f\n", c_list[i], hc, c_list[i] - hc, __half2float(__float2half(c_list[i])));
 //   }
 
-  unsigned a = 0x3f800000;
-  unsigned b = 0x10000001;
-  uint64_t c = concat(a, b);
-  printf("%x\n%x\n%lx\n", a, b, c);
-  printf("%x\n%x\n", (uint64_t)a, (uint64_t)b);
+  // unsigned a = 0x3f800000;
+  // unsigned b = 0x10000001;
+  // uint64_t c = concat(a, b);
+  // printf("%x\n%x\n%lx\n", a, b, c);
+  // printf("%x\n%x\n", (uint64_t)a, (uint64_t)b);
 
   GPU volta;
-  volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
-  volta.SIM_STG_INSTR(1, 64, 0, 0, 0);
+  // volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
+  // volta.SIM_STG_INSTR(1, 64, 0, 0, 0);
+  // volta.SIM_SHF_INSTR(0, 1, 2, 3, 0, 0, 0);
 }
