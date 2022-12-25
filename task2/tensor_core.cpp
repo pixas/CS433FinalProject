@@ -113,6 +113,11 @@ uint64_t concat(unsigned high, unsigned low) {
   return result;
 }
 
+void split(uint64_t data, unsigned &high, unsigned &low) {
+  high = data >> 32;
+  low = data & 0xffffffff;
+}
+
 /**
  * @brief Load data from global memory to register file
  * @param E: 1 if the address is 64-bit (load from Ra - Ra+1), 0 if the address is 32-bit (load from Ra)
@@ -242,6 +247,15 @@ void GPU::SIM_S2R_INSTR(unsigned Rd, s_reg_t SR) {
   }
 }
 
+/**
+ * @brief IMAD instruction
+ * @param Rd: the first destination register
+ * @param Ra: the source register for multiplication
+ * @param Sb: the source register for multiplication
+ * @param Sc: the source register for addition
+ * @param wide: 1 if the data is 64-bit, 0 if the data is 32-bit
+ * @param fmt: 1 if the data is signed, 0 if the data is unsigned
+ */
 void GPU::SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, bool wide, unsigned fmt) {
   // IMAD implementation
   for (int threadIdx = 0; threadIdx < WARP_SIZE_; threadIdx++) {
@@ -250,33 +264,39 @@ void GPU::SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, boo
     if (wide) {
       if (fmt) {
         int64_t data;
-        // TODO: int x int -> 64bit? reg file order?
-        data = ((int)ra_data * (int)sb_data) & 0xffffffffffffffff;
-        int64_t * sc_data = (int64_t * )&regfile_[Sc * WARP_SIZE_ + threadIdx];
-        int64_t * rd_data = (int64_t *)&regfile_[Rd * WARP_SIZE_ + threadIdx];  
-        *rd_data = data + (*sc_data);
+        data = ((int64_t)ra_data * (int64_t)sb_data) & 0xffffffffffffffff;
+        unsigned &sc_data_0 = regfile_[Sc * WARP_SIZE_ + threadIdx];
+        unsigned &sc_data_1 = regfile_[(Sc + 1) * WARP_SIZE_ + threadIdx];
+        int64_t sc_data = concat(sc_data_1, sc_data_0);
+        int64_t rd_data = data + sc_data;
+
+        unsigned &rd_data_0 = regfile_[Rd * WARP_SIZE_ + threadIdx];
+        unsigned &rd_data_1 = regfile_[(Rd + 1) * WARP_SIZE_ + threadIdx];
+        split((uint64_t)rd_data, rd_data_1, rd_data_0);
       } else {
         uint64_t data;
-        data = (ra_data * sb_data) & 0xffffffffffffffff;
-        uint64_t * sc_data = (uint64_t*)&regfile_[Sc * WARP_SIZE_ + threadIdx];
-        uint64_t * rd_data = (uint64_t *)&regfile_[Rd * WARP_SIZE_ + threadIdx];
-        *rd_data = data + (*sc_data);
+        data = ((uint64_t)ra_data * (uint64_t)sb_data) & 0xffffffffffffffff;
+        unsigned &sc_data_0 = regfile_[Sc * WARP_SIZE_ + threadIdx];
+        unsigned &sc_data_1 = regfile_[(Sc + 1) * WARP_SIZE_ + threadIdx];
+        uint64_t sc_data = concat(sc_data_1, sc_data_0);
+        uint64_t rd_data = data + sc_data;
+
+        unsigned &rd_data_0 = regfile_[Rd * WARP_SIZE_ + threadIdx];
+        unsigned &rd_data_1 = regfile_[(Rd + 1) * WARP_SIZE_ + threadIdx];
+        split(rd_data, rd_data_1, rd_data_0);
       }
     } else {
       if (fmt) {
         int data;
-        data = ((int)ra_data * (int)sb_data) & 0xffffffffffffffff;
-        int * sc_data = (int * )&regfile_[Sc * WARP_SIZE_ + threadIdx];
-        int * rd_data = (int *)&regfile_[Rd * WARP_SIZE_ + threadIdx];  
-        *rd_data = data + (*sc_data);
+        data = ((int)ra_data * (int)sb_data) & 0xffffffff;
+        int sc_data = (int)regfile_[Sc * WARP_SIZE_ + threadIdx];
+        regfile_[Rd * WARP_SIZE_ + threadIdx] = data + sc_data;
       } else {
         unsigned data;
-        data = (ra_data * sb_data) & 0xffffffffffffffff;
-        unsigned * sc_data = (unsigned*)&regfile_[Sc * WARP_SIZE_ + threadIdx];
-        unsigned * rd_data = (unsigned *)&regfile_[Rd * WARP_SIZE_ + threadIdx];
-        *rd_data = data + (*sc_data);
+        data = ((unsigned)ra_data * (unsigned)sb_data) & 0xffffffff;
+        unsigned &sc_data = regfile_[Sc * WARP_SIZE_ + threadIdx];
+        regfile_[Rd * WARP_SIZE_ + threadIdx] = data + sc_data;
       }
-
     }
   }
 }
@@ -502,4 +522,18 @@ int main() {
   // volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
   // volta.SIM_STG_INSTR(1, 64, 0, 0, 0);
   // volta.SIM_SHF_INSTR(0, 1, 2, 3, 0, 0, 0);
+
+  uint64_t a = 0x123456789abcdef0;
+  unsigned b, c;
+  split(a, b, c);
+  printf("%lx\n%x\n%x\n", a, b, c);
+
+  int64_t a1 = 0x123456789abcdef0;
+  unsigned b1, c1;
+  split((uint64_t)a1, b1, c1);
+  printf("%lx\n%x\n%x\n", a1, b1, c1);
+  unsigned a2 = 0xf0000000;
+  int b2 = (int)a2;
+  printf("%x\n%x\n", a2, b2);
+  printf("%d\n", b2);
 }
