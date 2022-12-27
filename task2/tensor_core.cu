@@ -49,8 +49,8 @@ int main() {
   cudaMemcpy(d_b, b.data(), sizeof(half) * size, cudaMemcpyHostToDevice);
 
   dim3 blockDim, gridDim;
-  blockDim.x = 4 * 32;
-  blockDim.y = 4;
+  blockDim.x = 1 * 32;
+  blockDim.y = 1;
   gridDim.x = 1;
   gridDim.y = 1;
   wmma_kernel<<<gridDim, blockDim>>>(d_a, d_b, d_c);
