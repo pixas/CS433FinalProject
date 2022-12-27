@@ -42,10 +42,10 @@ class GPU {
   GPU();
   void SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned imm);
   void SIM_STG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned imm);
-  void SIM_HMMA_INSTR_STEP0();
-  void SIM_HMMA_INSTR_STEP1();
-  void SIM_HMMA_INSTR_STEP2();
-  void SIM_HMMA_INSTR_STEP3();
+  void SIM_HMMA_INSTR_STEP0(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, unsigned a_fmt=1, unsigned b_fmt=1);
+  void SIM_HMMA_INSTR_STEP1(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, unsigned a_fmt=1, unsigned b_fmt=1);
+  void SIM_HMMA_INSTR_STEP2(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, unsigned a_fmt=1, unsigned b_fmt=1);
+  void SIM_HMMA_INSTR_STEP3(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, unsigned a_fmt=1, unsigned b_fmt=1);
   void SIM_S2R_INSTR(unsigned Rd, s_reg_t SR);
   void SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, bool wide, unsigned fmt=1);
   void SIM_LOP3_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc,
@@ -53,12 +53,12 @@ class GPU {
   void SIM_MOV_INSTR(unsigned Rd, unsigned Sc);
   void SIM_SHF_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, bool dir, bool maxshift, bool HI);
   void SIM_CS2R_INSTR(unsigned Rd, s_reg_t SR);
-  void SIM_LEA_INSTR(bool HI, bool X, unsigned Rd, unsigned Ra, unsigned Sb,
-                     unsigned imm, unsigned Pd0 = 7, unsigned Ps0 = 7);
+  void SIM_LEA_INSTR(bool HI, bool X, unsigned Rd, unsigned Ra, unsigned Sb, 
+                     unsigned imm, unsigned Sc = 255,unsigned Pd0 = 7, unsigned Ps0 = 7);
   void SIM_EXIT_INSTR();
   unsigned *memory_;
-  size_t allocated_size_;
-  size_t memory_size_;
+  uint64_t allocated_size_;
+  uint64_t memory_size_;
   unsigned total_thread() {return WARP_SIZE_;}
   unsigned reg_content(unsigned Rid, int t) {return regfile_[Rid * WARP_SIZE_ + t];}
  private:
