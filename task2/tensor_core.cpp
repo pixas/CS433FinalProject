@@ -1107,7 +1107,7 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
  *  @param n the col of matric b
  *  @param k the col/row of matric a/b
 */
-void gemm(float *a, float *b, float *c, float *d, int m, int k, int n) {
+void gemm(float *a, float *b, float *c, float *d, int m, int k, int n, GPU& volta, dim3 & gridDim, dim3 & blockDim) {
   // host function gemm
   // mxnxk=? According to the pytorch source code, find the matrix size of the
   // conv2d operator of Resnet18 when doing matrix multiplication after
@@ -1115,6 +1115,111 @@ void gemm(float *a, float *b, float *c, float *d, int m, int k, int n) {
   // considerthe settings of blockDim and gridDim, we limit only one warp, how
   // to slicethe matrix to a matrix of 16*16*16 size, what to do if it cannot
   // be divisible evenly
+
+  // first pad 0 to m, k, n
+  int padding;
+  
+  // follow 16 x 16 to store a, b, c to gpu memory
+  int true_m = ((m - 1) / 16 + 1) * 16;
+  int true_n = ((n - 1) / 16 + 1) * 16;
+  int true_k = ((k - 1) / 16 + 1) * 16;
+
+  uint64_t matric_a_size = sizeof(__half) * true_m * true_k;
+  uint64_t matric_b_size = sizeof(__half) * true_k * true_n;
+  uint64_t matric_c_size = sizeof(float) * true_m * true_n;
+
+  // memory allocation
+  __half * padded_a, *padded_b;
+  float * padded_c; 
+  float * block_c;
+  simMalloc((void **)&padded_a, matric_a_size, volta);
+  simMalloc((void **)&padded_b, matric_b_size, volta);
+  simMalloc((void **)&padded_c, matric_c_size, volta);
+
+  simMalloc((void **)&block_c, sizeof(float) * 256, volta);
+
+  // store the matric to GPU following Z
+  int a_row_blocks = true_m / 16;
+  int b_col_blocks = true_n / 16;
+  int common_blocks = true_k / 16;
+
+  for (int i = 0; i < a_row_blocks; ++i) {
+    for (int j = 0; j < common_blocks; ++j) {
+      int true_i = i * 16;
+      int true_j = j * 16;
+
+      for (int block_i = true_i; block_i < true_i + 16; ++block_i) {
+        for (int block_j = true_j; block_j < true_j + 16; ++block_j) {
+          if (block_i < m && block_j < k) {
+            // printf("%d %d\n", block_i, block_j);
+            padded_a[i * common_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(a[block_i * k + block_j]);
+          } else {
+            padded_a[i * common_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(0.0);
+          }
+        }
+      }
+    }
+  }
+
+  for (int i = 0; i < common_blocks; ++i) {
+    for (int j = 0; j < b_col_blocks; ++j) {
+      int true_i = i * 16;
+      int true_j = j * 16;
+
+      for (int block_i = true_i; block_i < true_i + 16; ++block_i) {
+        for (int block_j = true_j; block_j < true_j + 16; ++block_j) {
+          if (block_i < k && block_j < n) {
+            // printf("%d %d\n", block_i, block_j);
+            padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(b[block_i * k + block_j]);
+          } else {
+            padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(0.0);
+          }
+        }
+      }
+    }
+  }
+
+  // now, we can call wmma function
+  // to compute the ith-row, j-th col block, we need to compute all padded_a[i, 0:common_blocks] * padded_a[0: common_blocks, j]
+  // to fetch each block, the header pointer is padded_a + i * common_blocks * 16 * 16 + k * 16 * 16
+  // padded_b + k * common_blocks * 16 * 16 + j * 16 * 16
+  for (int i = 0; i < a_row_blocks; ++i) {
+    for (int j = 0; j < b_col_blocks; ++j) {
+      float * header_c = padded_c + i * b_col_blocks * 16 * 16 + j * 16 * 16;
+      for (int k = 0; k < common_blocks; ++k) {
+        // fetch the header pointer;
+        __half * header_a = padded_a + i * common_blocks * 16 * 16 + k * 16 * 16;
+        __half * header_b = padded_b + k * b_col_blocks * 16 * 16 + j * 16 * 16;
+        wmma_kernel(header_a, header_b, block_c, d, gridDim, blockDim, volta);
+        for (int i = 0; i < 256; ++i) {
+          header_c[i] += block_c[i];
+        }
+      }
+    }
+  }
+
+
+  // now store the padded_c to c
+  for (int i = 0; i < a_row_blocks; ++i) {
+    for (int j = 0; j < b_col_blocks; ++j) {
+      int true_i = i * 16;
+      int true_j = j * 16;
+
+      for (int block_i = true_i; block_i < true_i + 16; ++block_i) {
+        for (int block_j = true_j; block_j < true_j + 16; ++block_j) {
+          if (block_i < m && block_j < n) {
+            // printf("%d %d\n", block_i, block_j);
+            c[block_i * n + block_j] = padded_c[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)];
+          }
+            // padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(b[block_i * k + block_j]);
+          // } else {
+          //   padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(0.0);
+          // }
+        }
+      }
+    }
+  }
+
 }
 
 void im2col() {
@@ -1122,59 +1227,59 @@ void im2col() {
 }
 void conv() {}
 
-int main() {
-//   float a_list[16] = {pow(2, -20), 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5};
-//   float b_list[16] = {0, -0.1, 0.2, -0.3, 0.4, -0.5, 0.6, 0.7, 0.8, -0.9, 1, 1.1, 1.2, -1.3, 1.4, 1.5};
-//   float c_list[16];
+// int main() {
+// //   float a_list[16] = {pow(2, -20), 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5};
+// //   float b_list[16] = {0, -0.1, 0.2, -0.3, 0.4, -0.5, 0.6, 0.7, 0.8, -0.9, 1, 1.1, 1.2, -1.3, 1.4, 1.5};
+// //   float c_list[16];
 
-//   __half ha_list[16], hb_list[16];
+// //   __half ha_list[16], hb_list[16];
 
+// //   for (int i = 0; i < 16; i++) {
+// //     ha_list[i] = __float2half(a_list[i]);
+// //     hb_list[i] = __float2half(b_list[i]);
+// //     std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
+// //   }
+
+// //   for (int i = 0; i < 16; i++) {
+// //     c_list[i] = a_list[i] * b_list[i];
+// //     float hc = ha_list[i] * hb_list[i];
+// //     printf("%f %f %f %f\n", c_list[i], hc, c_list[i] - hc, __half2float(__float2half(c_list[i])));
+// //   }
+//   vector<__half> a(16 * 16), b(16 * 16);
+//   vector<float> c(16 * 16);
 //   for (int i = 0; i < 16; i++) {
-//     ha_list[i] = __float2half(a_list[i]);
-//     hb_list[i] = __float2half(b_list[i]);
-//     std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
+//     for (int j = 0; j < 16; j++) {
+//       a[i * 16 + j] = __float2half(i * 16 + j);
+//       b[i * 16 + j] = __float2half(- i * 16 - j);
+//     }
 //   }
 
-//   for (int i = 0; i < 16; i++) {
-//     c_list[i] = a_list[i] * b_list[i];
-//     float hc = ha_list[i] * hb_list[i];
-//     printf("%f %f %f %f\n", c_list[i], hc, c_list[i] - hc, __half2float(__float2half(c_list[i])));
-//   }
-  vector<__half> a(16 * 16), b(16 * 16);
-  vector<float> c(16 * 16);
-  for (int i = 0; i < 16; i++) {
-    for (int j = 0; j < 16; j++) {
-      a[i * 16 + j] = __float2half(i * 16 + j);
-      b[i * 16 + j] = __float2half(- i * 16 - j);
-    }
-  }
+//   int size = 16 * 16;
+//   __half *d_a, *d_b;
+//   float* d_c;
+//   float * d_d;
+//   GPU volta;
+//   simMalloc((void**)(&d_a), sizeof(__half) * size, volta);
+//   simMalloc((void**)(&d_b), sizeof(__half) * size, volta);
+//   simMalloc((void**)(&d_c), sizeof(float) * size, volta);
+//   simMalloc((void**)(&d_d), sizeof(float) * size, volta);
+//   simMemcpy(d_a, a.data(), sizeof(__half) * size, MemcpyHostToDevice, volta);
+//   simMemcpy(d_b, b.data(), sizeof(__half) * size, MemcpyHostToDevice, volta);
+//   dim3 grid = {1, 1, 1};
+//   dim3 block = {1, 1, 1};
+//   wmma_kernel(d_a, d_b, d_c, d_d, grid, block, volta);
+//   // for (int i = 0; i < 16; i++) {
+//   //   for (int j = 0; j < 16; j++) {
+//   //     printf("%f ", d_c[i * 16 + j]);
+//   //   }
+//   //   printf("\n");
+//   // }
+//   // unsigned a = 0x3f800000;
+//   // unsigned b = 0x10000001;
+//   // uint64_t c = concat(a, b);
+//   // printf("%x\n%x\n%lx\n", a, b, c);
+//   // printf("%x\n%x\n", (uint64_t)a, (uint64_t)b);
 
-  int size = 16 * 16;
-  __half *d_a, *d_b;
-  float* d_c;
-  float * d_d;
-  GPU volta;
-  simMalloc((void**)(&d_a), sizeof(__half) * size, volta);
-  simMalloc((void**)(&d_b), sizeof(__half) * size, volta);
-  simMalloc((void**)(&d_c), sizeof(float) * size, volta);
-  simMalloc((void**)(&d_d), sizeof(float) * size, volta);
-  simMemcpy(d_a, a.data(), sizeof(__half) * size, MemcpyHostToDevice, volta);
-  simMemcpy(d_b, b.data(), sizeof(__half) * size, MemcpyHostToDevice, volta);
-  dim3 grid = {1, 1, 1};
-  dim3 block = {1, 1, 1};
-  wmma_kernel(d_a, d_b, d_c, d_d, grid, block, volta);
-  // for (int i = 0; i < 16; i++) {
-  //   for (int j = 0; j < 16; j++) {
-  //     printf("%f ", d_c[i * 16 + j]);
-  //   }
-  //   printf("\n");
-  // }
-  // unsigned a = 0x3f800000;
-  // unsigned b = 0x10000001;
-  // uint64_t c = concat(a, b);
-  // printf("%x\n%x\n%lx\n", a, b, c);
-  // printf("%x\n%x\n", (uint64_t)a, (uint64_t)b);
-
-  // volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
-  // volta.SIM_STG_INSTR(1, 64, 0, 0, 0);
-}
+//   // volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
+//   // volta.SIM_STG_INSTR(1, 64, 0, 0, 0);
+// }

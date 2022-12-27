@@ -9,7 +9,8 @@ using std::vector;
 
 enum cudaMemcpyKind {
   MemcpyHostToDevice = 0, /**< Host   -> Device */
-  MemcpyDeviceToHost = 1  /**< Device -> Host */
+  MemcpyDeviceToHost = 1,  /**< Device -> Host */
+  MemcpyDeviceToDevice = 2, /**< Device   -> Device */
 };
 
 enum s_reg_t { SRZ = 0, SR_LAINID, SR_TID_X, SR_TID_Y, SR_CTAID_X, SR_CTAID_Y };

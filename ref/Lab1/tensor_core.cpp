@@ -13,10 +13,6 @@ void print_hex(uint32_t num) {
 void print_reg(GPU& volta, unsigned Rid) {
   for (int i = 0; i < volta.total_thread(); ++i) {
     printf("Reg %d T%d: ", Rid, i);
-    // unsigned val = volta.reg_content(Rid, i);
-    // printf("%.2f Reg %d T%d: ", *(float *)&val, Rid + 1, i);
-    // unsigned val1 = volta.reg_content(Rid + 1, i);
-    // printf("%.2f\n", *(float *)&val1);
     // print_binary(volta.reg_content(Rid, i));
     print_hex(volta.reg_content(Rid, i));
     // printf(" ");
@@ -27,18 +23,17 @@ void print_reg(GPU& volta, unsigned Rid) {
 void print_reg_val(GPU& volta, unsigned Rid, unsigned bits=16) {
   for (int i = 0; i < volta.total_thread(); ++i) {
     printf("Reg %d T%d: ", Rid, i);
-    // // print_binary(volta.reg_content(Rid, i));
+    // print_binary(volta.reg_content(Rid, i));
     unsigned val1 = volta.reg_content(Rid, i);
     unsigned val2 = volta.reg_content(Rid + 1, i);
     uint64_t val = concat(val2, val1);
-    printf("[print_reg_val] val: %.2f\n", *(float *)val);
-    // if (bits == 16) {
-    //   // print half
-    //   __half* true_val = (__half *)val;
-    //   printf("%.2f\n", __half2float(*true_val));
-    // } else if (bits == 32) {
-    //   printf("%.4f\n", *(float *)val);
-    // }
+    if (bits == 16) {
+      // print half
+      __half* true_val = (__half *)val;
+      printf("%.2f\n", __half2float(*true_val));
+    } else if (bits == 32) {
+      printf("%.4f\n", *(float *)val);
+    }
     // printf(" ");
   }
   printf("\n\n");
@@ -182,7 +177,7 @@ GPU::GPU() {
   // memory size, assuming sm=1 and warp_num=1
   constexpr unsigned MEMORY_SIZE = 1024 * 1024 * 1024;  // 1 GB
   memory_ = new unsigned[MEMORY_SIZE];
-  memory_size_ = (uint64_t)MEMORY_SIZE * 4;
+  memory_size_ = (uint64_t) (sizeof(unsigned) * MEMORY_SIZE);
   // Initialize the register file and pre-register file
   unsigned REGFILE_SIZE = WARP_SIZE_ * 256;
   regfile_ = new unsigned[REGFILE_SIZE];
@@ -228,12 +223,10 @@ void GPU::SIM_LDG_INSTR(bool E, unsigned sz, unsigned Rd, unsigned Ra, unsigned 
       unsigned &ra_data_0 = regfile_[Ra * WARP_SIZE_ + threadIdx];
       unsigned &ra_data_1 = regfile_[(Ra + 1) * WARP_SIZE_ + threadIdx];
       uint64_t addr = concat(ra_data_1, ra_data_0) + (uint64_t)imm;
-      // data_ptr = &memory_[addr / 4];  // unsigned is 4 bytes
       data_ptr = (unsigned *)addr;
     } else {
       unsigned &ra_data = regfile_[Ra * WARP_SIZE_ + threadIdx];
       unsigned addr = ra_data + imm;
-      // data_ptr = &memory_[addr / 4];  // unsigned is 4 bytes
       data_ptr = (unsigned *)addr;
     }
     switch (sz) {
@@ -275,14 +268,10 @@ void GPU::SIM_STG_INSTR(bool E, unsigned sz, unsigned Sb, unsigned Ra, unsigned 
       unsigned addr = ra_data + imm;
       data_ptr = (unsigned *)addr;
     }
-    unsigned * data_ptr2 = data_ptr + 1;
-
     switch (sz) {
       case 64:
-        *data_ptr = regfile_[Sb * WARP_SIZE_ + threadIdx];
-        // *(data_ptr) = regfile_[Sb * WARP_SIZE_ + threadIdx];
-        *data_ptr2 = regfile_[(Sb + 1) * WARP_SIZE_ + threadIdx];
-        // printf("[STG] data_0: %.2f data_1: %.2f\n", *(float *)data_ptr, *(float *)data_ptr2);
+        *(data_ptr) = regfile_[Sb * WARP_SIZE_ + threadIdx];
+        *(data_ptr + 1) = regfile_[(Sb + 1) * WARP_SIZE_ + threadIdx];
         break;
       case 128:
         *(data_ptr) = regfile_[Sb * WARP_SIZE_ + threadIdx];
@@ -313,102 +302,198 @@ __half parse_half(unsigned origin, bool first) {
 void GPU::SIM_HMMA_INSTR_STEP0(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, unsigned a_fmt, unsigned b_fmt) {
   if (a_fmt && b_fmt) {
     // only implement row major
-    for (int group_id = 0; group_id < 8; ++group_id) {
-      // iterate over 8 thread groups
-      // inside each thread group, fetch regfile_[Ra * warpsize + (group_id * 4)] and regfile_[Ra * warpsize + (group_id * 4 + 1)]
-      int thread_begin = group_id * 4;
+    for (int octet_idx = 0; octet_idx < 4; ++octet_idx) {
+      int thread_group_idx_0 = octet_idx;
+      int thread_group_idx_1 = octet_idx + 4;
 
-      for (int k = 0; k < 4; ++k) {
-        for (int thread_a = thread_begin; thread_a < thread_begin + 2; ++thread_a) {
-          unsigned matric_c_thread = thread_a + (k / 2) * 2;
-          unsigned sc_index = (k % 2 ? (Sc + 1) : Sc) * WARP_SIZE_ + matric_c_thread;
-          float Sc_val = *(float *)&regfile_[sc_index];
-          // float temp = 0.;
-
-          for (int thread_b = thread_begin; thread_b < thread_begin + 4; ++thread_b) {
-            // if (k == 0) {
-            //   __half element_a = (unsigned short)(regfile_[Ra * WARP_SIZE_ + thread_a] & 0xffff);
-            //   __half element_b = (unsigned short)(regfile_[Sb * WARP_SIZE_ + k] & 0xffff);
-              
-            // }
-            int thread_b_group_id = thread_b - thread_begin;
-            int true_thread_b = thread_b;
-            if (group_id >= 4) {
-              true_thread_b = thread_begin % 16 + thread_b_group_id;
-            }
-            __half element_b = parse_half(regfile_[(k < 2 ? Sb : Sb + 1) * WARP_SIZE_ + (true_thread_b)], k % 2 == 0);
-            __half element_a;
-            if (thread_b_group_id < 2) {
-              // use Ra
-              element_a = parse_half(regfile_[Ra * WARP_SIZE_ + thread_a], thread_b_group_id % 2 == 0);
-            } else {
-              // use Ra + 1
-              element_a = parse_half(regfile_[(Ra + 1) * WARP_SIZE_ + thread_a], thread_b_group_id % 2 == 0);
-              // __half element_b = parse_half(regfile_[(k < 2 ? Sb : Sb + 1) * WARP_SIZE_ + thread_b], k % 2 == 0);
-            }
-            Sc_val = element_a * element_b + Sc_val;
+      // first thread group
+      for (int thread_matrix_a_idx = 4 * thread_group_idx_0; thread_matrix_a_idx < 4 * thread_group_idx_0 + 2; ++thread_matrix_a_idx) {
+        __half a_data_0 = parse_half(regfile_[Ra * WARP_SIZE_ + thread_matrix_a_idx], true);
+        __half a_data_1 = parse_half(regfile_[Ra * WARP_SIZE_ + thread_matrix_a_idx], false);
+        __half a_data_2 = parse_half(regfile_[(Ra + 1) * WARP_SIZE_ + thread_matrix_a_idx], true);
+        __half a_data_3 = parse_half(regfile_[(Ra + 1) * WARP_SIZE_ + thread_matrix_a_idx], false);
+        float c_data_0 = *(float*)(&regfile_[Sc * WARP_SIZE_ + thread_matrix_a_idx]);
+        float c_data_1 = *(float*)(&regfile_[(Sc + 1) * WARP_SIZE_ + thread_matrix_a_idx]);
+        float c_data_2 = *(float*)(&regfile_[Sc * WARP_SIZE_ + thread_matrix_a_idx + 2]);
+        float c_data_3 = *(float*)(&regfile_[(Sc + 1) * WARP_SIZE_ + thread_matrix_a_idx + 2]);
+        for (int idx = 0; idx < 4; ++idx) {
+          int thread_matrix_b_idx = 4 * thread_group_idx_0 + idx;
+          __half b_data_0 = parse_half(regfile_[Sb * WARP_SIZE_ + thread_matrix_b_idx], true);
+          __half b_data_1 = parse_half(regfile_[Sb * WARP_SIZE_ + thread_matrix_b_idx], false);
+          __half b_data_2 = parse_half(regfile_[(Sb + 1) * WARP_SIZE_ + thread_matrix_b_idx], true);
+          __half b_data_3 = parse_half(regfile_[(Sb + 1) * WARP_SIZE_ + thread_matrix_b_idx], false);
+          if (idx == 0) {
+            c_data_0 += a_data_0 * b_data_0;
+            c_data_1 += a_data_0 * b_data_1;
+            c_data_2 += a_data_0 * b_data_2;
+            c_data_3 += a_data_0 * b_data_3;
+          } else if (idx == 1) {
+            c_data_0 += a_data_1 * b_data_0;
+            c_data_1 += a_data_1 * b_data_1;
+            c_data_2 += a_data_1 * b_data_2;
+            c_data_3 += a_data_1 * b_data_3;
+          } else if (idx == 2) {
+            c_data_0 += a_data_2 * b_data_0;
+            c_data_1 += a_data_2 * b_data_1;
+            c_data_2 += a_data_2 * b_data_2;
+            c_data_3 += a_data_2 * b_data_3;
+          } else if (idx == 3) {
+            c_data_0 += a_data_3 * b_data_0;
+            c_data_1 += a_data_3 * b_data_1;
+            c_data_2 += a_data_3 * b_data_2;
+            c_data_3 += a_data_3 * b_data_3;
           }
-          // printf("%d %.2f\n", matric_c_thread, Sc_val);
-          regfile_[sc_index] = *(unsigned *)&Sc_val;
         }
+        regfile_[Rd * WARP_SIZE_ + thread_matrix_a_idx] = *reinterpret_cast<unsigned*>(&c_data_0);
+        regfile_[(Rd + 1) * WARP_SIZE_ + thread_matrix_a_idx] = *reinterpret_cast<unsigned*>(&c_data_1);
+        regfile_[Rd * WARP_SIZE_ + (thread_matrix_a_idx + 2)] = *reinterpret_cast<unsigned*>(&c_data_2);
+        regfile_[(Rd + 1) * WARP_SIZE_ + (thread_matrix_a_idx + 2)] = *reinterpret_cast<unsigned*>(&c_data_3);
       }
-      // for (int thread_b = 0; thread_b < 4; ++thread_b) {
-      //   int true_thread_b = group_id * 8 + thread_b;
-      //   __half element_b = regfile_[Sb * WARP_SIZE_ + true_thread_b]
-      // }
+
+      // second thread group
+      for (int thread_matrix_a_idx = 4 * thread_group_idx_1; thread_matrix_a_idx < 4 * thread_group_idx_1 + 2; ++thread_matrix_a_idx) {
+        __half a_data_0 = parse_half(regfile_[Ra * WARP_SIZE_ + thread_matrix_a_idx], true);
+        __half a_data_1 = parse_half(regfile_[Ra * WARP_SIZE_ + thread_matrix_a_idx], false);
+        __half a_data_2 = parse_half(regfile_[(Ra + 1) * WARP_SIZE_ + thread_matrix_a_idx], true);
+        __half a_data_3 = parse_half(regfile_[(Ra + 1) * WARP_SIZE_ + thread_matrix_a_idx], false);
+        float c_data_0 = *(float*)(&regfile_[Sc * WARP_SIZE_ + thread_matrix_a_idx]);
+        float c_data_1 = *(float*)(&regfile_[(Sc + 1) * WARP_SIZE_ + thread_matrix_a_idx]);
+        float c_data_2 = *(float*)(&regfile_[Sc * WARP_SIZE_ + thread_matrix_a_idx + 2]);
+        float c_data_3 = *(float*)(&regfile_[(Sc + 1) * WARP_SIZE_ + thread_matrix_a_idx + 2]);
+        for (int idx = 0; idx < 4; ++idx) {
+          int thread_matrix_b_idx = 4 * thread_group_idx_0 + idx;
+          __half b_data_0 = parse_half(regfile_[Sb * WARP_SIZE_ + thread_matrix_b_idx], true);
+          __half b_data_1 = parse_half(regfile_[Sb * WARP_SIZE_ + thread_matrix_b_idx], false);
+          __half b_data_2 = parse_half(regfile_[(Sb + 1) * WARP_SIZE_ + thread_matrix_b_idx], true);
+          __half b_data_3 = parse_half(regfile_[(Sb + 1) * WARP_SIZE_ + thread_matrix_b_idx], false);
+
+          if (idx == 0) {
+            c_data_0 += a_data_0 * b_data_0;
+            c_data_1 += a_data_0 * b_data_1;
+            c_data_2 += a_data_0 * b_data_2;
+            c_data_3 += a_data_0 * b_data_3;
+          } else if (idx == 1) {
+            c_data_0 += a_data_1 * b_data_0;
+            c_data_1 += a_data_1 * b_data_1;
+            c_data_2 += a_data_1 * b_data_2;
+            c_data_3 += a_data_1 * b_data_3;
+          } else if (idx == 2) {
+            c_data_0 += a_data_2 * b_data_0;
+            c_data_1 += a_data_2 * b_data_1;
+            c_data_2 += a_data_2 * b_data_2;
+            c_data_3 += a_data_2 * b_data_3;
+          } else if (idx == 3) {
+            c_data_0 += a_data_3 * b_data_0;
+            c_data_1 += a_data_3 * b_data_1;
+            c_data_2 += a_data_3 * b_data_2;
+            c_data_3 += a_data_3 * b_data_3;
+          }
+        }
+        regfile_[Rd * WARP_SIZE_ + thread_matrix_a_idx] = *reinterpret_cast<unsigned*>(&c_data_0);
+        regfile_[(Rd + 1) * WARP_SIZE_ + thread_matrix_a_idx] = *reinterpret_cast<unsigned*>(&c_data_1);
+        regfile_[Rd * WARP_SIZE_ + (thread_matrix_a_idx + 2)] = *reinterpret_cast<unsigned*>(&c_data_2);
+        regfile_[(Rd + 1) * WARP_SIZE_ + (thread_matrix_a_idx + 2)] = *reinterpret_cast<unsigned*>(&c_data_3);
+      }
     }
   }
-  // HMMA.STEP0 implementation
 }
 void GPU::SIM_HMMA_INSTR_STEP1(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, unsigned a_fmt, unsigned b_fmt) {
   if (a_fmt && b_fmt) {
     // only implement row major
-    for (int group_id = 0; group_id < 8; ++group_id) {
-      // iterate over 8 thread groups
-      // inside each thread group, fetch regfile_[Ra * warpsize + (group_id * 4)] and regfile_[Ra * warpsize + (group_id * 4 + 1)]
-      int thread_begin = group_id * 4;
+    for (int octet_idx = 0; octet_idx < 4; ++octet_idx) {
+      int thread_group_idx_0 = octet_idx;
+      int thread_group_idx_1 = octet_idx + 4;
 
-      for (int k = 0; k < 4; ++k) {
-        for (int thread_a = thread_begin + 2; thread_a < thread_begin + 4; ++thread_a) {
-          unsigned matric_c_thread = thread_a - 2 + (k / 2) * 2;
-          unsigned sc_index = (k % 2 ? (Sc + 1) : Sc) * WARP_SIZE_ + matric_c_thread;
-          float Sc_val = *(float *)&regfile_[sc_index];
-          // float temp = 0.;
-
-          for (int thread_b = thread_begin; thread_b < thread_begin + 4; ++thread_b) {
-            // if (k == 0) {
-            //   __half element_a = (unsigned short)(regfile_[Ra * WARP_SIZE_ + thread_a] & 0xffff);
-            //   __half element_b = (unsigned short)(regfile_[Sb * WARP_SIZE_ + k] & 0xffff);
-              
-            // }
-            int thread_b_group_id = thread_b - thread_begin;
-            int true_thread_b = thread_b;
-            if (group_id >= 4) {
-              true_thread_b = thread_begin % 16 + thread_b_group_id;
-            }
-            __half element_b = parse_half(regfile_[(k < 2 ? Sb : Sb + 1) * WARP_SIZE_ + (true_thread_b)], k % 2 == 0);
-            __half element_a;
-            if (thread_b_group_id < 2) {
-              // use Ra
-              element_a = parse_half(regfile_[Ra * WARP_SIZE_ + thread_a], thread_b_group_id % 2 == 0);
-            } else {
-              // use Ra + 1
-              element_a = parse_half(regfile_[(Ra + 1) * WARP_SIZE_ + thread_a], thread_b_group_id % 2 == 0);
-              // __half element_b = parse_half(regfile_[(k < 2 ? Sb : Sb + 1) * WARP_SIZE_ + thread_b], k % 2 == 0);
-            }
-            Sc_val = element_a * element_b + Sc_val;
+      // first thread group
+      for (int thread_matrix_a_idx = 4 * thread_group_idx_0 + 2; thread_matrix_a_idx < 4 * thread_group_idx_0 + 4; ++thread_matrix_a_idx) {
+        __half a_data_0 = parse_half(regfile_[Ra * WARP_SIZE_ + thread_matrix_a_idx], true);
+        __half a_data_1 = parse_half(regfile_[Ra * WARP_SIZE_ + thread_matrix_a_idx], false);
+        __half a_data_2 = parse_half(regfile_[(Ra + 1) * WARP_SIZE_ + thread_matrix_a_idx], true);
+        __half a_data_3 = parse_half(regfile_[(Ra + 1) * WARP_SIZE_ + thread_matrix_a_idx], false);
+        float c_data_0 = *(float*)(&regfile_[Sc * WARP_SIZE_ + (thread_matrix_a_idx - 2)]);
+        float c_data_1 = *(float*)(&regfile_[(Sc + 1) * WARP_SIZE_ + (thread_matrix_a_idx - 2)]);
+        float c_data_2 = *(float*)(&regfile_[Sc * WARP_SIZE_ + thread_matrix_a_idx]);
+        float c_data_3 = *(float*)(&regfile_[(Sc + 1) * WARP_SIZE_ + thread_matrix_a_idx]);
+        for (int idx = 0; idx < 4; ++idx) {
+          int thread_matrix_b_idx = 4 * thread_group_idx_0 + idx;
+          __half b_data_0 = parse_half(regfile_[Sb * WARP_SIZE_ + thread_matrix_b_idx], true);
+          __half b_data_1 = parse_half(regfile_[Sb * WARP_SIZE_ + thread_matrix_b_idx], false);
+          __half b_data_2 = parse_half(regfile_[(Sb + 1) * WARP_SIZE_ + thread_matrix_b_idx], true);
+          __half b_data_3 = parse_half(regfile_[(Sb + 1) * WARP_SIZE_ + thread_matrix_b_idx], false);
+          if (idx == 0) {
+            c_data_0 += a_data_0 * b_data_0;
+            c_data_1 += a_data_0 * b_data_1;
+            c_data_2 += a_data_0 * b_data_2;
+            c_data_3 += a_data_0 * b_data_3;
+          } else if (idx == 1) {
+            c_data_0 += a_data_1 * b_data_0;
+            c_data_1 += a_data_1 * b_data_1;
+            c_data_2 += a_data_1 * b_data_2;
+            c_data_3 += a_data_1 * b_data_3;
+          } else if (idx == 2) {
+            c_data_0 += a_data_2 * b_data_0;
+            c_data_1 += a_data_2 * b_data_1;
+            c_data_2 += a_data_2 * b_data_2;
+            c_data_3 += a_data_2 * b_data_3;
+          } else if (idx == 3) {
+            c_data_0 += a_data_3 * b_data_0;
+            c_data_1 += a_data_3 * b_data_1;
+            c_data_2 += a_data_3 * b_data_2;
+            c_data_3 += a_data_3 * b_data_3;
           }
-          // printf("%d %.2f\n", matric_c_thread, Sc_val);
-          regfile_[sc_index] = *(unsigned *)&Sc_val;
         }
+        regfile_[Rd * WARP_SIZE_ + (thread_matrix_a_idx - 2)] = *reinterpret_cast<unsigned*>(&c_data_0);
+        regfile_[(Rd + 1) * WARP_SIZE_ + (thread_matrix_a_idx - 2)] = *reinterpret_cast<unsigned*>(&c_data_1);
+        regfile_[Rd * WARP_SIZE_ + thread_matrix_a_idx] = *reinterpret_cast<unsigned*>(&c_data_2);
+        regfile_[(Rd + 1) * WARP_SIZE_ + thread_matrix_a_idx] = *reinterpret_cast<unsigned*>(&c_data_3);
       }
-      // for (int thread_b = 0; thread_b < 4; ++thread_b) {
-      //   int true_thread_b = group_id * 8 + thread_b;
-      //   __half element_b = regfile_[Sb * WARP_SIZE_ + true_thread_b]
-      // }
+
+      // second thread group
+      for (int thread_matrix_a_idx = 4 * thread_group_idx_1 + 2; thread_matrix_a_idx < 4 * thread_group_idx_1 + 4; ++thread_matrix_a_idx) {
+        __half a_data_0 = parse_half(regfile_[Ra * WARP_SIZE_ + thread_matrix_a_idx], true);
+        __half a_data_1 = parse_half(regfile_[Ra * WARP_SIZE_ + thread_matrix_a_idx], false);
+        __half a_data_2 = parse_half(regfile_[(Ra + 1) * WARP_SIZE_ + thread_matrix_a_idx], true);
+        __half a_data_3 = parse_half(regfile_[(Ra + 1) * WARP_SIZE_ + thread_matrix_a_idx], false);
+        float c_data_0 = *(float*)(&regfile_[Sc * WARP_SIZE_ + (thread_matrix_a_idx - 2)]);
+        float c_data_1 = *(float*)(&regfile_[(Sc + 1) * WARP_SIZE_ + (thread_matrix_a_idx - 2)]);
+        float c_data_2 = *(float*)(&regfile_[Sc * WARP_SIZE_ + thread_matrix_a_idx]);
+        float c_data_3 = *(float*)(&regfile_[(Sc + 1) * WARP_SIZE_ + thread_matrix_a_idx]);
+        for (int idx = 0; idx < 4; ++idx) {
+          int thread_matrix_b_idx = 4 * thread_group_idx_0 + idx;
+          __half b_data_0 = parse_half(regfile_[Sb * WARP_SIZE_ + thread_matrix_b_idx], true);
+          __half b_data_1 = parse_half(regfile_[Sb * WARP_SIZE_ + thread_matrix_b_idx], false);
+          __half b_data_2 = parse_half(regfile_[(Sb + 1) * WARP_SIZE_ + thread_matrix_b_idx], true);
+          __half b_data_3 = parse_half(regfile_[(Sb + 1) * WARP_SIZE_ + thread_matrix_b_idx], false);
+
+          if (idx == 0) {
+            c_data_0 += a_data_0 * b_data_0;
+            c_data_1 += a_data_0 * b_data_1;
+            c_data_2 += a_data_0 * b_data_2;
+            c_data_3 += a_data_0 * b_data_3;
+          } else if (idx == 1) {
+            c_data_0 += a_data_1 * b_data_0;
+            c_data_1 += a_data_1 * b_data_1;
+            c_data_2 += a_data_1 * b_data_2;
+            c_data_3 += a_data_1 * b_data_3;
+          } else if (idx == 2) {
+            c_data_0 += a_data_2 * b_data_0;
+            c_data_1 += a_data_2 * b_data_1;
+            c_data_2 += a_data_2 * b_data_2;
+            c_data_3 += a_data_2 * b_data_3;
+          } else if (idx == 3) {
+            c_data_0 += a_data_3 * b_data_0;
+            c_data_1 += a_data_3 * b_data_1;
+            c_data_2 += a_data_3 * b_data_2;
+            c_data_3 += a_data_3 * b_data_3;
+          }
+        }
+        regfile_[Rd * WARP_SIZE_ + (thread_matrix_a_idx - 2)] = *reinterpret_cast<unsigned*>(&c_data_0);
+        regfile_[(Rd + 1) * WARP_SIZE_ + (thread_matrix_a_idx - 2)] = *reinterpret_cast<unsigned*>(&c_data_1);
+        regfile_[Rd * WARP_SIZE_ + thread_matrix_a_idx] = *reinterpret_cast<unsigned*>(&c_data_2);
+        regfile_[(Rd + 1) * WARP_SIZE_ + thread_matrix_a_idx] = *reinterpret_cast<unsigned*>(&c_data_3);
+      }
     }
   }
-  // HMMA.STEP1 implementation
 }
 void GPU::SIM_HMMA_INSTR_STEP2(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, unsigned a_fmt, unsigned b_fmt) {
   if (a_fmt && b_fmt) {
@@ -693,10 +778,9 @@ void GPU::SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, boo
       } else {
         unsigned data;
         data = ((unsigned)ra_data * (unsigned)sb_data) & 0xffffffff;
-        
+
         unsigned &sc_data = regfile_[Sc * WARP_SIZE_ + threadIdx];
         regfile_[Rd * WARP_SIZE_ + threadIdx] = data + sc_data;
-        // printf("%d\n", regfile_[Rd * WARP_SIZE_ + threadIdx]);
       }
     }
   }
@@ -797,7 +881,6 @@ void GPU::SIM_LEA_INSTR(bool HI, bool X, unsigned Rd, unsigned Ra, unsigned Sb,
     unsigned sb_data = regfile_[Sb * WARP_SIZE_ + threadIdx];
     uint64_t sc_data = regfile_[Sc * WARP_SIZE_ + threadIdx];
     uint64_t data = ra_data;
-    // printf("[LEA] Rid: %d origin data: %lx\n", Rd, data);
     if (Sc != 255) {
       uint64_t data = ((uint64_t)sc_data << 32) | ra_data;
     }
@@ -818,11 +901,11 @@ void GPU::SIM_EXIT_INSTR() {
   // EXIT implementation
 
   // Free any dynamically allocated memory
-  // delete[] memory_;
-  // delete[] regfile_;
-  // delete[] pregfile_;
-  // allocated_size_ = 0;
-  // memory_size_ = 0;
+  delete[] memory_;
+  delete[] regfile_;
+  delete[] pregfile_;
+  allocated_size_ = 0;
+  memory_size_ = 0;
   // Close any open files or connections
   // (if applicable)
 
@@ -833,7 +916,6 @@ void GPU::SIM_EXIT_INSTR() {
 void simMalloc(void **ptr, size_t size, GPU &volta) {
   // sim cudaMalloc
   // Request GPU memory
-
   if (volta.allocated_size_ + size > volta.memory_size_) {
     // Not enough memory available, throw an exception or return an error code
     throw std::bad_alloc();
@@ -845,7 +927,6 @@ void simMalloc(void **ptr, size_t size, GPU &volta) {
 }
 
 inline int check_in_GPU(void *ptr, size_t count, GPU &volta) {
-  // printf("%ld %ld\n", (unsigned char*)ptr + count , (unsigned char*)(volta.memory_) + volta.allocated_size_);
   // Check that the whole memory block is within the bounds of the GPU memory
   if (
     (unsigned char*)ptr >= (unsigned char*)(volta.memory_) &&
@@ -863,7 +944,8 @@ void simMemcpy(void *dst, void *src, size_t count, enum cudaMemcpyKind kind,
   // Check that the destination and source pointers are within the bounds of the GPU memory
   if (
     (kind == MemcpyHostToDevice && check_in_GPU(dst, count, volta)) ||
-    (kind == MemcpyDeviceToHost && check_in_GPU(src, count, volta))
+    (kind == MemcpyDeviceToHost && check_in_GPU(src, count, volta)) ||
+    (kind == MemcpyDeviceToDevice && check_in_GPU(dst, count, volta) && check_in_GPU(src, count, volta))
   ) {
     // Copy memory between the host and the GPU
     memcpy(dst, src, count);
@@ -877,12 +959,7 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
                  dim3 &blockDim, GPU &volta) {
   // device kernel function
   // gridDim & blockDim
-  // assume c[0x0][0x28]=0
-  const unsigned int c_0_28 = 0;
   const uint64_t c_0_160 = (uint64_t) a;
-  // cout << c_0_160 << endl;
-  // cout << __half2float(*(__half *)c_0_160) << endl;
-  // cout << __half2float(*((__half *)c_0_160 + 1)) << endl;
   const uint64_t c_0_168 = (uint64_t) b;
   const uint64_t c_0_170 = (uint64_t) c;
   const uint64_t c_0_178 = (uint64_t) d;
@@ -925,24 +1002,17 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   volta.SIM_IMAD_INSTR(3, 3, 1, 2, 0);
   // print_reg(volta, 3);
   volta.SIM_IMAD_INSTR(2, 4, 1, 255, 0, 0);
-  // print_reg(volta, 2);
   volta.SIM_MOV_INSTR(1, 0x2);
   volta.SIM_IMAD_INSTR(12, 3, 1, 255, 0, 0);
-  // print_reg(volta, 12);
   volta.SIM_IMAD_INSTR(3, 255, 255, 255, 0, 0);
-  // print_reg(volta, 3);
+
   // store the address of a to some register, assume to be 100-101
   volta.SIM_MOV_INSTR(100, (unsigned)(c_0_160 & 0xffffffff));
   volta.SIM_MOV_INSTR(101, (unsigned)(c_0_160 >> 32));
   volta.SIM_IMAD_INSTR(12, 12, 13, 100, 1, 0);
-  // print_reg(volta, 12);
-  // print_reg_val(volta, 12);
   volta.SIM_MOV_INSTR(1, 0x10);
   volta.SIM_IMAD_INSTR(2, 24, 1, 2, 1, 0);
-  // print_reg(volta, 2);
   volta.SIM_LDG_INSTR(1, 128, 16, 12, 0);
-  // print_reg(volta, 16);
-  // print_load(volta, 16);
   volta.SIM_MOV_INSTR(1, 0x1);
   volta.SIM_MOV_INSTR(100, (unsigned)(c_0_168 & 0xffffffff));
   volta.SIM_MOV_INSTR(101, (unsigned)(c_0_168 >> 32));
@@ -952,32 +1022,18 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   // print_reg(volta, 3);
   volta.SIM_LEA_INSTR(true, true, 27, 2, 101, 1, 3, 7, 0);
 
-  // print_reg_val(volta, 26);
   volta.SIM_CS2R_INSTR(4, SRZ);
   volta.SIM_LDG_INSTR(true, 128, 12, 12, 0x10);
-  // print_load(volta, 12, 16, 128);
   volta.SIM_LDG_INSTR(true, 64, 2, 26, 0);
   volta.SIM_CS2R_INSTR(6, SRZ);
   volta.SIM_CS2R_INSTR(8, SRZ);
   volta.SIM_CS2R_INSTR(10, SRZ);
   volta.SIM_LDG_INSTR(true, 64, 20, 26, 0x80);
-  // print_load(volta, 20, 16, 64);
   volta.SIM_MOV_INSTR(1, 0x4);
   volta.SIM_IMAD_INSTR(25, 22, 1, 255, 0, 0);
-  // volta.SIM_MOV_INSTR(80, 0xe2);
   volta.SIM_LOP3_INSTR(24, 25, 1, 24, 0xe2);
-  // print_load(volta, 16);
-  // print_load(volta, 12);
-  // print_load(volta, 2, 16, 64);
-  // print_load(volta, 1, 16, 64);
   volta.SIM_HMMA_INSTR_STEP0(4, 16, 2, 4);
-  // print_hmma_step0(volta, 4);
-  
-  // after step 0
-
   volta.SIM_HMMA_INSTR_STEP1(6, 16, 2, 6);
-  // print_hmma_step0(volta, 6);
-  // return ;
   
   volta.SIM_HMMA_INSTR_STEP2(8, 16, 2, 8);
   volta.SIM_HMMA_INSTR_STEP3(10, 16, 2, 10);
@@ -991,7 +1047,6 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   volta.SIM_IMAD_INSTR(23, 23, 80, 255, false, 0);
   volta.SIM_MOV_INSTR(81, 0x5);
   volta.SIM_LOP3_INSTR(24, 24, 81, 255, 0xc0);
-  // volta.SIM_MOV_INSTR(80, 0x5);
   volta.SIM_IMAD_INSTR(22, 0, 80, 25, 0, 1);
   volta.SIM_LOP3_INSTR(25, 23, 80, 24, 0xe2);
   volta.SIM_IMAD_INSTR(23, 255, 255, 255, 0, 0);
@@ -1017,20 +1072,21 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   volta.SIM_HMMA_INSTR_STEP2(8, 14, 2, 8);
   volta.SIM_HMMA_INSTR_STEP3(10, 14, 2, 10);
   volta.SIM_LEA_INSTR(true, true, 13, 22, 101, 0x2, 23, 7, 0);
-  
-  // print_reg(volta, 4);
-  // print_reg_val(volta, 12, 32);
-  // print_reg(volta, 6);
-  // printf("[wmma] allocated size: %ld\n", volta.allocated_size_);
-  // printf("0x%lx\n", (uint64_t)(c_0_170));
-  print_reg(volta, 12);
-  print_reg(volta, 13);
+
+
+  // load 12 and 13 value to another register for calculation
+
   volta.SIM_STG_INSTR(true, 64, 4, 12, 0);
   volta.SIM_STG_INSTR(true, 64, 6, 12, 0x80);
   volta.SIM_STG_INSTR(true, 64, 8, 12, 0x10);
   volta.SIM_STG_INSTR(true, 64, 10, 12, 0x90);
-  printf("[wmma] c_val: %.2f %.2f\n", c[0], c[1]);
-  volta.SIM_EXIT_INSTR();
+  // for (int i = 0; i < 16; ++i) {
+  //   for (int j = 0; j < 16; ++j) {
+  //     printf("%f ", c[i * 16 + j]);
+  //   }
+  //   printf("\n");
+  // } 
+  // volta.SIM_EXIT_INSTR();
 
   // print_load(volta, 2, 16, 64);
   // print_reg_val(volta, 16);
@@ -1047,7 +1103,15 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   // add instruction you need,sim_imad_instr() is just an example
 }
 
-void gemm(float *a, float *b, float *c, float *d) {
+/** general matrix multiplication
+ *  @param a matrix_a, with shape [m x k]
+ *  @param b matric_b, with shape [k x n]
+ *  @param c matric_c, with shape [m x n], the matric to be stored
+ *  @param m the row of matric a 
+ *  @param n the col of matric b
+ *  @param k the col/row of matric a/b
+*/
+void gemm(float *a, float *b, float *c, float *d, int m, int k, int n, GPU& volta, dim3 & gridDim, dim3 & blockDim) {
   // host function gemm
   // mxnxk=? According to the pytorch source code, find the matrix size of the
   // conv2d operator of Resnet18 when doing matrix multiplication after
@@ -1055,6 +1119,111 @@ void gemm(float *a, float *b, float *c, float *d) {
   // considerthe settings of blockDim and gridDim, we limit only one warp, how
   // to slicethe matrix to a matrix of 16*16*16 size, what to do if it cannot
   // be divisible evenly
+
+  // first pad 0 to m, k, n
+  int padding;
+  
+  // follow 16 x 16 to store a, b, c to gpu memory
+  int true_m = ((m - 1) / 16 + 1) * 16;
+  int true_n = ((n - 1) / 16 + 1) * 16;
+  int true_k = ((k - 1) / 16 + 1) * 16;
+
+  uint64_t matric_a_size = sizeof(__half) * true_m * true_k;
+  uint64_t matric_b_size = sizeof(__half) * true_k * true_n;
+  uint64_t matric_c_size = sizeof(float) * true_m * true_n;
+
+  // memory allocation
+  __half * padded_a, *padded_b;
+  float * padded_c; 
+  float * block_c;
+  simMalloc((void **)&padded_a, matric_a_size, volta);
+  simMalloc((void **)&padded_b, matric_b_size, volta);
+  simMalloc((void **)&padded_c, matric_c_size, volta);
+
+  simMalloc((void **)&block_c, sizeof(float) * 256, volta);
+
+  // store the matric to GPU following Z
+  int a_row_blocks = true_m / 16;
+  int b_col_blocks = true_n / 16;
+  int common_blocks = true_k / 16;
+
+  for (int i = 0; i < a_row_blocks; ++i) {
+    for (int j = 0; j < common_blocks; ++j) {
+      int true_i = i * 16;
+      int true_j = j * 16;
+
+      for (int block_i = true_i; block_i < true_i + 16; ++block_i) {
+        for (int block_j = true_j; block_j < true_j + 16; ++block_j) {
+          if (block_i < m && block_j < k) {
+            // printf("%d %d\n", block_i, block_j);
+            padded_a[i * common_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(a[block_i * k + block_j]);
+          } else {
+            padded_a[i * common_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(0.0);
+          }
+        }
+      }
+    }
+  }
+
+  for (int i = 0; i < common_blocks; ++i) {
+    for (int j = 0; j < b_col_blocks; ++j) {
+      int true_i = i * 16;
+      int true_j = j * 16;
+
+      for (int block_i = true_i; block_i < true_i + 16; ++block_i) {
+        for (int block_j = true_j; block_j < true_j + 16; ++block_j) {
+          if (block_i < k && block_j < n) {
+            // printf("%d %d\n", block_i, block_j);
+            padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(b[block_i * k + block_j]);
+          } else {
+            padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(0.0);
+          }
+        }
+      }
+    }
+  }
+
+  // now, we can call wmma function
+  // to compute the ith-row, j-th col block, we need to compute all padded_a[i, 0:common_blocks] * padded_a[0: common_blocks, j]
+  // to fetch each block, the header pointer is padded_a + i * common_blocks * 16 * 16 + k * 16 * 16
+  // padded_b + k * common_blocks * 16 * 16 + j * 16 * 16
+  for (int i = 0; i < a_row_blocks; ++i) {
+    for (int j = 0; j < b_col_blocks; ++j) {
+      float * header_c = padded_c + i * b_col_blocks * 16 * 16 + j * 16 * 16;
+      for (int k = 0; k < common_blocks; ++k) {
+        // fetch the header pointer;
+        __half * header_a = padded_a + i * common_blocks * 16 * 16 + k * 16 * 16;
+        __half * header_b = padded_b + k * b_col_blocks * 16 * 16 + j * 16 * 16;
+        wmma_kernel(header_a, header_b, block_c, d, gridDim, blockDim, volta);
+        for (int i = 0; i < 256; ++i) {
+          header_c[i] += block_c[i];
+        }
+      }
+    }
+  }
+
+
+  // now store the padded_c to c
+  for (int i = 0; i < a_row_blocks; ++i) {
+    for (int j = 0; j < b_col_blocks; ++j) {
+      int true_i = i * 16;
+      int true_j = j * 16;
+
+      for (int block_i = true_i; block_i < true_i + 16; ++block_i) {
+        for (int block_j = true_j; block_j < true_j + 16; ++block_j) {
+          if (block_i < m && block_j < n) {
+            // printf("%d %d\n", block_i, block_j);
+            c[block_i * n + block_j] = padded_c[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)];
+          }
+            // padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(b[block_i * k + block_j]);
+          // } else {
+          //   padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(0.0);
+          // }
+        }
+      }
+    }
+  }
+
 }
 
 void im2col() {
@@ -1062,80 +1231,88 @@ void im2col() {
 }
 void conv() {}
 
-int main() {
-//   float a_list[16] = {pow(2, -20), 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5};
-//   float b_list[16] = {0, -0.1, 0.2, -0.3, 0.4, -0.5, 0.6, 0.7, 0.8, -0.9, 1, 1.1, 1.2, -1.3, 1.4, 1.5};
-//   float c_list[16];
+// int main() {
+// //   float a_list[16] = {pow(2, -20), 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5};
+// //   float b_list[16] = {0, -0.1, 0.2, -0.3, 0.4, -0.5, 0.6, 0.7, 0.8, -0.9, 1, 1.1, 1.2, -1.3, 1.4, 1.5};
+// //   float c_list[16];
 
-//   __half ha_list[16], hb_list[16];
+// //   __half ha_list[16], hb_list[16];
 
-//   for (int i = 0; i < 16; i++) {
-//     ha_list[i] = __float2half(a_list[i]);
-//     hb_list[i] = __float2half(b_list[i]);
-//     std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
+// //   for (int i = 0; i < 16; i++) {
+// //     ha_list[i] = __float2half(a_list[i]);
+// //     hb_list[i] = __float2half(b_list[i]);
+// //     std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
+// //   }
+
+// //   for (int i = 0; i < 16; i++) {
+// //     c_list[i] = a_list[i] * b_list[i];
+// //     float hc = ha_list[i] * hb_list[i];
+// //     printf("%f %f %f %f\n", c_list[i], hc, c_list[i] - hc, __half2float(__float2half(c_list[i])));
+// //   }
+//   int single_size = 21;
+//   int size = single_size * single_size;
+//   vector<float> a(size), b(size);
+//   vector<float> c(size, 0);
+//   for (int i = 0; i < single_size; i++) {
+//     for (int j = 0; j < single_size; j++) {
+//       a[i * single_size + j] = i + j;
+//       b[i * single_size + j] = -i - j;
+//     }
 //   }
+//   // for (int i = 0; i < 20; ++i) {
+//   //   for (int j = 0; j < 20; ++j) {
+//   //     printf("%.2f ", (a[i * 20 + j]));
+//   //   }
+//   //   printf("\n");
+//   // }
 
-//   for (int i = 0; i < 16; i++) {
-//     c_list[i] = a_list[i] * b_list[i];
-//     float hc = ha_list[i] * hb_list[i];
-//     printf("%f %f %f %f\n", c_list[i], hc, c_list[i] - hc, __half2float(__float2half(c_list[i])));
+//   float *d_a, *d_b;
+//   float* d_c;
+//   float * d_d;
+//   GPU volta;
+//   simMalloc((void**)(&d_a), sizeof(float) * size, volta);
+//   simMalloc((void**)(&d_b), sizeof(float) * size, volta);
+//   simMalloc((void**)(&d_c), sizeof(float) * size, volta);
+//   simMalloc((void**)(&d_d), sizeof(float) * size, volta);
+//   simMemcpy(d_a, a.data(), sizeof(float) * size, MemcpyHostToDevice, volta);
+//   simMemcpy(d_b, b.data(), sizeof(float) * size, MemcpyHostToDevice, volta);
+//   dim3 grid = {1, 1, 1};
+//   dim3 block = {1, 1, 1};
+//   // wmma_kernel(d_a, d_b, d_c, d_d, grid, block, volta);
+//   gemm(d_a, d_b, d_c, d_d, single_size, single_size, single_size, volta, grid, block);
+//   simMemcpy(c.data(), d_c, sizeof(float) * size, MemcpyDeviceToHost, volta);
+
+//   for (int i = 0; i < single_size; i++) {
+//     for (int j = 0; j < single_size; j++) {
+//       printf("%.3f ", c[i * single_size + j]);
+//     }
+//     printf("\n");
 //   }
-  vector<__half> a(16 * 16), b(16 * 16);
-  vector<float> c(16 * 16, 0);
-  for (int i = 0; i < 16; i++) {
-    for (int j = 0; j < 16; j++) {
-      if (1){
-        a[i * 16 + j] = __float2half(i * 16 + j);
-        b[i * 16 + j] = __float2half(- i * 16 - j);
+//   printf("\n");
+//   c.clear();
+//   c.resize(size, 0);
+//   for (int i = 0; i < single_size; ++i) {
+//     for (int j = 0; j < single_size; ++j) {
+//       for (int k = 0; k < single_size; ++k) {
+//         c[i * single_size + j] += a[i * single_size + k] * b[k * single_size + j];
+//       }
+//       // printf("%.3f ", c[i * single_size + j]);
+//     }
+//     // printf("\n");
+//   }
+//   for (int i = 0; i < single_size; ++i) {
+//     for (int j = 0; j < single_size; ++j) {
+//       printf("%.3f ", c[i * single_size + j]);
+//     }
+//     printf("\n");
+//   }
+  
+//   // unsigned a = 0x3f800000;
+//   // unsigned b = 0x10000001;
+//   // uint64_t c = concat(a, b);
+//   // printf("%x\n%x\n%lx\n", a, b, c);
+//   // printf("%x\n%x\n", (uint64_t)a, (uint64_t)b);
 
-      } else {
-        a[i * 16 + j] = __float2half(0);
-        b[i * 16 + j] = __float2half(0);
-      }
-    }
-  }
-
-  int size = 16 * 16;
-  __half *d_a, *d_b;
-  float* d_c;
-  float * d_d;
-  GPU volta;
-  try {
-    simMalloc((void**)(&d_a), sizeof(__half) * size, volta);
-
-  } catch (std::bad_alloc) {
-    printf("allocated size: %ld, size: %ld, memory: %ld\n", volta.allocated_size_, sizeof(__half) * size, volta.memory_size_);
-  }
-  simMalloc((void**)(&d_b), sizeof(__half) * size, volta);
-  // printf("allocated size: %ld\n", volta.allocated_size_);
-  simMalloc((void**)(&d_c), sizeof(float) * size, volta);
-  // printf("allocated size: %ld\n", volta.allocated_size_);
-  simMalloc((void**)(&d_d), sizeof(float) * size, volta);
-  // printf("allocated size: %ld\n", volta.allocated_size_);
-  // printf("%ld %ld %ld %ld\n", d_a, d_b, d_c, d_d);
-  simMemcpy(d_a, a.data(), sizeof(__half) * size, MemcpyHostToDevice, volta);
-  // printf("allocated size: %ld\n", volta.allocated_size_);
-  simMemcpy(d_b, b.data(), sizeof(__half) * size, MemcpyHostToDevice, volta);
-  simMemcpy(d_c, c.data(), sizeof(__half) * size, MemcpyHostToDevice, volta);
-  // printf("allocated size: %ld\n", volta.allocated_size_);
-  dim3 grid = {1, 1, 1};
-  dim3 block = {1, 1, 1};
-  // printf("allocated size: %ld\n", volta.allocated_size_);
-  wmma_kernel(d_a, d_b, d_c, d_d, grid, block, volta);
-  // printf("allocated size: %ld\n", volta.allocated_size_);
-  simMemcpy(c.data(), d_c, sizeof(float) * size, MemcpyDeviceToHost, volta);
-  for (int i = 0; i < 16; ++i) {
-    for (int j = 0; j < 16; ++j) {
-      printf("%.2f%s", c[i * 16 + j], (j == 15 ? "\n": " "));
-      // cout << c[i * 16 + j] << (j == 15 ? "\n": " ");
-    }
-  }
-  // unsigned a = 0x3f800000;
-  // unsigned b = 0x10000001;
-  // uint64_t c = concat(a, b);
-  // printf("%x\n%x\n%lx\n", a, b, c);
-  // printf("%x\n%x\n", (uint64_t)a, (uint64_t)b);
-
-  // volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
-  // volta.SIM_STG_INSTR(1, 64, 0, 0, 0);
-}
+//   // volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
+//   // volta.SIM_STG_INSTR(1, 64, 0, 0, 0);
+// }
