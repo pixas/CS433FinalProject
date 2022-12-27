@@ -8,7 +8,7 @@ with open('/home/group14/CS433FinalProject/task1/target/output/predictions.txt')
 pred_files = [line.split()[0] for line in predictions]
 predictions = [line.split()[1] for line in predictions]
 
-accuracy, total = 0, len(labels)
+accuracy, total = 0, len(predictions)
 error_list = []
 for i in range(total):
     if files[i] != pred_files[i]:

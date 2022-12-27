@@ -13,7 +13,7 @@ class DataLoader {
     private:
         int bsz;
         int n_workers;
-        int max_file = 10000;
+        int max_file = 5000;
         int file_ptr = 0;
         std::vector<std::string> file_list;
     public:

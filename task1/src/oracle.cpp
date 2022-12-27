@@ -41,7 +41,7 @@ int main(int argc, char const *argv[])
 {
     cv::dnn::Net net = load_model("/home/group14/CS433FinalProject/task1/resnet18.onnx");
     std::vector<std::string> file_list;
-    const int max_file = 10000;
+    const int max_file = 5000;
     file_list.resize(max_file);
     std::fstream f_cin;
     std::string file_name = "/home/group14/CS433FinalProject/task1/select_file_list.txt";
