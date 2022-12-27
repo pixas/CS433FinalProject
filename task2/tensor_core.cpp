@@ -1001,24 +1001,17 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   volta.SIM_IMAD_INSTR(3, 3, 1, 2, 0);
   // print_reg(volta, 3);
   volta.SIM_IMAD_INSTR(2, 4, 1, 255, 0, 0);
-  // print_reg(volta, 2);
   volta.SIM_MOV_INSTR(1, 0x2);
   volta.SIM_IMAD_INSTR(12, 3, 1, 255, 0, 0);
-  // print_reg(volta, 12);
   volta.SIM_IMAD_INSTR(3, 255, 255, 255, 0, 0);
-  // print_reg(volta, 3);
+
   // store the address of a to some register, assume to be 100-101
   volta.SIM_MOV_INSTR(100, (unsigned)(c_0_160 & 0xffffffff));
   volta.SIM_MOV_INSTR(101, (unsigned)(c_0_160 >> 32));
   volta.SIM_IMAD_INSTR(12, 12, 13, 100, 1, 0);
-  // print_reg(volta, 12);
-  // print_reg_val(volta, 12);
   volta.SIM_MOV_INSTR(1, 0x10);
   volta.SIM_IMAD_INSTR(2, 24, 1, 2, 1, 0);
-  // print_reg(volta, 2);
   volta.SIM_LDG_INSTR(1, 128, 16, 12, 0);
-  // print_reg(volta, 16);
-  // print_load(volta, 16);
   volta.SIM_MOV_INSTR(1, 0x1);
   volta.SIM_MOV_INSTR(100, (unsigned)(c_0_168 & 0xffffffff));
   volta.SIM_MOV_INSTR(101, (unsigned)(c_0_168 >> 32));
@@ -1028,32 +1021,18 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   // print_reg(volta, 3);
   volta.SIM_LEA_INSTR(true, true, 27, 2, 101, 1, 3, 7, 0);
 
-  // print_reg_val(volta, 26);
   volta.SIM_CS2R_INSTR(4, SRZ);
   volta.SIM_LDG_INSTR(true, 128, 12, 12, 0x10);
-  // print_load(volta, 12, 16, 128);
   volta.SIM_LDG_INSTR(true, 64, 2, 26, 0);
   volta.SIM_CS2R_INSTR(6, SRZ);
   volta.SIM_CS2R_INSTR(8, SRZ);
   volta.SIM_CS2R_INSTR(10, SRZ);
   volta.SIM_LDG_INSTR(true, 64, 20, 26, 0x80);
-  // print_load(volta, 20, 16, 64);
   volta.SIM_MOV_INSTR(1, 0x4);
   volta.SIM_IMAD_INSTR(25, 22, 1, 255, 0, 0);
-  // volta.SIM_MOV_INSTR(80, 0xe2);
   volta.SIM_LOP3_INSTR(24, 25, 1, 24, 0xe2);
-  // print_load(volta, 16);
-  // print_load(volta, 12);
-  // print_load(volta, 2, 16, 64);
-  // print_load(volta, 1, 16, 64);
   volta.SIM_HMMA_INSTR_STEP0(4, 16, 2, 4);
-  // print_hmma_step0(volta, 4);
-  
-  // after step 0
-
   volta.SIM_HMMA_INSTR_STEP1(6, 16, 2, 6);
-  // print_hmma_step0(volta, 6);
-  // return ;
   
   volta.SIM_HMMA_INSTR_STEP2(8, 16, 2, 8);
   volta.SIM_HMMA_INSTR_STEP3(10, 16, 2, 10);
@@ -1067,7 +1046,6 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   volta.SIM_IMAD_INSTR(23, 23, 80, 255, false, 0);
   volta.SIM_MOV_INSTR(81, 0x5);
   volta.SIM_LOP3_INSTR(24, 24, 81, 255, 0xc0);
-  // volta.SIM_MOV_INSTR(80, 0x5);
   volta.SIM_IMAD_INSTR(22, 0, 80, 25, 0, 1);
   volta.SIM_LOP3_INSTR(25, 23, 80, 24, 0xe2);
   volta.SIM_IMAD_INSTR(23, 255, 255, 255, 0, 0);
@@ -1121,7 +1099,15 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   // add instruction you need,sim_imad_instr() is just an example
 }
 
-void gemm(float *a, float *b, float *c, float *d) {
+/** general matrix multiplication
+ *  @param a matrix_a, with shape [m x k]
+ *  @param b matric_b, with shape [k x n]
+ *  @param c matric_c, with shape [m x n], the matric to be stored
+ *  @param m the row of matric a 
+ *  @param n the col of matric b
+ *  @param k the col/row of matric a/b
+*/
+void gemm(float *a, float *b, float *c, float *d, int m, int k, int n) {
   // host function gemm
   // mxnxk=? According to the pytorch source code, find the matrix size of the
   // conv2d operator of Resnet18 when doing matrix multiplication after
