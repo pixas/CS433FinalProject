@@ -1,4 +1,4 @@
-#include "tensor_core.h"
+#include "tensor_core.hpp"
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
@@ -6,86 +6,9 @@
 #include <iomanip>
 
 using namespace std;
-void print_hex(uint32_t num) {
-  std::cout << "0x" << std::setw(8) << std::setfill('0') << std::hex << num << std::endl;
-}
-
-void print_reg(GPU& volta, unsigned Rid) {
-  for (int i = 0; i < volta.total_thread(); ++i) {
-    printf("Reg %d T%d: ", Rid, i);
-    // print_binary(volta.reg_content(Rid, i));
-    print_hex(volta.reg_content(Rid, i));
-    // printf(" ");
-  }
-  printf("\n\n");
-} 
-
-void print_reg_val(GPU& volta, unsigned Rid, unsigned bits=16) {
-  for (int i = 0; i < volta.total_thread(); ++i) {
-    printf("Reg %d T%d: ", Rid, i);
-    // print_binary(volta.reg_content(Rid, i));
-    unsigned val1 = volta.reg_content(Rid, i);
-    unsigned val2 = volta.reg_content(Rid + 1, i);
-    uint64_t val = concat(val2, val1);
-    if (bits == 16) {
-      // print half
-      __half* true_val = (__half *)val;
-      printf("%.2f\n", __half2float(*true_val));
-    } else if (bits == 32) {
-      printf("%.4f\n", *(float *)val);
-    }
-    // printf(" ");
-  }
-  printf("\n\n");
-}
-
-void print_load(GPU& volta, unsigned Rid, unsigned bits=16, unsigned sz=128) {
-  for (int i = 0; i < volta.total_thread(); ++i) {
-    // print_binary(volta.reg_content(Rid, i));
-    printf("T%d ", i);
-    if (sz == 128) {
-      // unsigned val1 = volta.reg_content(Rid, i);
-      // unsigned val2 = volta.reg_content(Rid + 1, i);
-      // unsigned val3 = volta.reg_content(Rid + 2, i);
-      // unsigned val4 = volta.reg_content(Rid + 3, i);  
-      for (int shift = 0; shift < 4; ++shift) {
-        printf("Reg %d: ", Rid + shift);
-        unsigned val_shift = volta.reg_content(Rid + shift, i);
-        __half val_1((unsigned short)(val_shift >> 16));
-        __half val_0((unsigned short)(val_shift & 0xffff));
-        printf("%.2f %.2f ", __half2float(val_0), __half2float(val_1));
-        
-      }
-      printf("\n");
-    }
-  else {
-    // unsigned val1 = volta.reg_content(Rid, i);
-    // unsigned val2 = volta.reg_content(Rid + 1, i);
-    for (int shift = 0; shift < 2; ++shift) {
-        printf("Reg %d: ", Rid + shift);
-        unsigned val_shift = volta.reg_content(Rid + shift, i);
-        __half val_1((unsigned short)(val_shift >> 16));
-        __half val_0((unsigned short)(val_shift & 0xffff));
-        printf("%.2f %.2f ", __half2float(val_0), __half2float(val_1));
-        
-      }
-      printf("\n");
-  }
-  }
-  printf("\n\n");
-}
-
-void print_hmma_step0(GPU& volta, unsigned Rid) {
-  for (int i = 0; i < volta.total_thread(); ++i) {
-    unsigned val_0 = volta.reg_content(Rid, i);
-    unsigned val_1 = volta.reg_content(Rid + 1, i);
-    printf("T%d Reg %d: %.2f ", i, Rid, *(float *)&val_0);
-    printf("T%d Reg %d: %.2f\n", i, Rid + 1, *(float *)&val_1);
-  }
-  printf("\n");
-}
-
-__half __float2half(const float &a) {
+namespace simVolta
+{
+  __half __float2half(const float &a) {
   uint32_t bits = *(uint32_t*)&a;
   int sign = (bits >> 31) & 0x1;
   int exponent = (bits >> 23) & 0xff;
@@ -972,34 +895,23 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   volta.SIM_MOV_INSTR(1, 0x2);
 
   volta.SIM_SHF_INSTR(23, 255, 1, 24, 1, 1, 1);
-  // print_reg(volta, 23);
   volta.SIM_MOV_INSTR(1, 0x4);
   volta.SIM_SHF_INSTR(22, 0, 1, 24, 1, 1, 1);
-  // print_reg(volta, 22);
-  // volta.SIM_MOV_INSTR(2, 0xc0);
   volta.SIM_MOV_INSTR(1, 0x3);
   volta.SIM_LOP3_INSTR(23, 23, 1, 255, 0xc0);
-  // print_reg(volta, 23);
   volta.SIM_LOP3_INSTR(24, 24, 1, 255, 0xc0);
-  // print_reg(volta, 24);
   volta.SIM_MOV_INSTR(1, 0x1);
   volta.SIM_LOP3_INSTR(3, 22, 1, 255, 0xc0);
-  // print_reg(volta, 3);
   volta.SIM_MOV_INSTR(1, 0x8);
-  // print_reg(volta, 23);
   volta.SIM_IMAD_INSTR(5, 23, 1, 255, 0, 0);
   volta.SIM_MOV_INSTR(1, 0x1);
   volta.SIM_SHF_INSTR(0, 255, 1, 23, 1, 1, 1);
-  // print_reg(volta, 0);
   volta.SIM_MOV_INSTR(1, 0x8);
   volta.SIM_LOP3_INSTR(2, 5, 1, 24, 0xe2);
-  // print_reg(volta, 2);
   volta.SIM_MOV_INSTR(1, 0x2);
   volta.SIM_IMAD_INSTR(4, 0, 1, 3, 0);
-  // print_reg(volta, 4);
   volta.SIM_MOV_INSTR(1, 0x4);
   volta.SIM_IMAD_INSTR(3, 3, 1, 2, 0);
-  // print_reg(volta, 3);
   volta.SIM_IMAD_INSTR(2, 4, 1, 255, 0, 0);
   volta.SIM_MOV_INSTR(1, 0x2);
   volta.SIM_IMAD_INSTR(12, 3, 1, 255, 0, 0);
@@ -1015,10 +927,7 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   volta.SIM_MOV_INSTR(1, 0x1);
   volta.SIM_MOV_INSTR(100, (unsigned)(c_0_168 & 0xffffffff));
   volta.SIM_MOV_INSTR(101, (unsigned)(c_0_168 >> 32));
-  // print_reg(volta, 2);
-  // printf("0x%lx\n", (uint64_t)(c_0_168));
   volta.SIM_LEA_INSTR(false, false, 26, 2, 100, 1, 255, 0);
-  // print_reg(volta, 3);
   volta.SIM_LEA_INSTR(true, true, 27, 2, 101, 1, 3, 7, 0);
 
   volta.SIM_CS2R_INSTR(4, SRZ);
@@ -1076,27 +985,6 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   volta.SIM_STG_INSTR(true, 64, 6, 12, 0x80);
   volta.SIM_STG_INSTR(true, 64, 8, 12, 0x10);
   volta.SIM_STG_INSTR(true, 64, 10, 12, 0x90);
-  for (int i = 0; i < 16; ++i) {
-    for (int j = 0; j < 16; ++j) {
-      printf("%f ", c[i * 16 + j]);
-    }
-    printf("\n");
-  } 
-  // volta.SIM_EXIT_INSTR();
-
-  // print_load(volta, 2, 16, 64);
-  // print_reg_val(volta, 16);
-  // 16 x 16 mma
-
-  // load a, b, c to gpu memory
-  // thread group 0, 2 load a[0:3], 
-  // thread group 4, 6 load a[4:7]
-  // thread group 1, 3 load a[8:11]
-  // thread group 5, 7 load a[12:15]
-  // volta.SIM_LDG_INSTR(1, 128, 2, ((unsigned int)a / 4), 0);
-  // volta.SIM_LDG_INSTR(1, 128)
-  // volta.SIM_IMAD_INSTR(unsigned Rd, unsigned Ra, unsigned Sb, unsigned Sc, unsigned fmt, bool wide);  // SASS: IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;
-  // add instruction you need,sim_imad_instr() is just an example
 }
 
 /** general matrix multiplication
@@ -1107,8 +995,8 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
  *  @param n the col of matric b
  *  @param k the col/row of matric a/b
 */
-void gemm(float *a, float *b, float *c, float *d, int m, int k, int n, GPU& volta, dim3 & gridDim, dim3 & blockDim) {
-  // host function gemm
+void sim_gemm(float *a, float *b, float *c, float *d, int m, int k, int n, GPU& volta, dim3 & gridDim, dim3 & blockDim) {
+  // host function sim_gemm
   // mxnxk=? According to the pytorch source code, find the matrix size of the
   // conv2d operator of Resnet18 when doing matrix multiplication after
   // im2col. Remember to turn off cudnn and use the cublas library We need to
@@ -1129,9 +1017,9 @@ void gemm(float *a, float *b, float *c, float *d, int m, int k, int n, GPU& volt
   uint64_t matric_c_size = sizeof(float) * true_m * true_n;
 
   // memory allocation
-  __half * padded_a, *padded_b;
-  float * padded_c; 
-  float * block_c;
+  __half *padded_a, *padded_b;
+  float *padded_c; 
+  float *block_c;
   simMalloc((void **)&padded_a, matric_a_size, volta);
   simMalloc((void **)&padded_b, matric_b_size, volta);
   simMalloc((void **)&padded_c, matric_c_size, volta);
@@ -1170,7 +1058,7 @@ void gemm(float *a, float *b, float *c, float *d, int m, int k, int n, GPU& volt
         for (int block_j = true_j; block_j < true_j + 16; ++block_j) {
           if (block_i < k && block_j < n) {
             // printf("%d %d\n", block_i, block_j);
-            padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(b[block_i * k + block_j]);
+            padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(b[block_i * n + block_j]);
           } else {
             padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(0.0);
           }
@@ -1211,75 +1099,16 @@ void gemm(float *a, float *b, float *c, float *d, int m, int k, int n, GPU& volt
             // printf("%d %d\n", block_i, block_j);
             c[block_i * n + block_j] = padded_c[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)];
           }
-            // padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(b[block_i * k + block_j]);
-          // } else {
-          //   padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(0.0);
-          // }
         }
       }
     }
   }
 
 }
+} // namespace simVolta
 
 void im2col() {
   // ref caffe
 }
 void conv() {}
 
-// int main() {
-// //   float a_list[16] = {pow(2, -20), 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5};
-// //   float b_list[16] = {0, -0.1, 0.2, -0.3, 0.4, -0.5, 0.6, 0.7, 0.8, -0.9, 1, 1.1, 1.2, -1.3, 1.4, 1.5};
-// //   float c_list[16];
-
-// //   __half ha_list[16], hb_list[16];
-
-// //   for (int i = 0; i < 16; i++) {
-// //     ha_list[i] = __float2half(a_list[i]);
-// //     hb_list[i] = __float2half(b_list[i]);
-// //     std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
-// //   }
-
-// //   for (int i = 0; i < 16; i++) {
-// //     c_list[i] = a_list[i] * b_list[i];
-// //     float hc = ha_list[i] * hb_list[i];
-// //     printf("%f %f %f %f\n", c_list[i], hc, c_list[i] - hc, __half2float(__float2half(c_list[i])));
-// //   }
-//   vector<__half> a(16 * 16), b(16 * 16);
-//   vector<float> c(16 * 16);
-//   for (int i = 0; i < 16; i++) {
-//     for (int j = 0; j < 16; j++) {
-//       a[i * 16 + j] = __float2half(i * 16 + j);
-//       b[i * 16 + j] = __float2half(- i * 16 - j);
-//     }
-//   }
-
-//   int size = 16 * 16;
-//   __half *d_a, *d_b;
-//   float* d_c;
-//   float * d_d;
-//   GPU volta;
-//   simMalloc((void**)(&d_a), sizeof(__half) * size, volta);
-//   simMalloc((void**)(&d_b), sizeof(__half) * size, volta);
-//   simMalloc((void**)(&d_c), sizeof(float) * size, volta);
-//   simMalloc((void**)(&d_d), sizeof(float) * size, volta);
-//   simMemcpy(d_a, a.data(), sizeof(__half) * size, MemcpyHostToDevice, volta);
-//   simMemcpy(d_b, b.data(), sizeof(__half) * size, MemcpyHostToDevice, volta);
-//   dim3 grid = {1, 1, 1};
-//   dim3 block = {1, 1, 1};
-//   wmma_kernel(d_a, d_b, d_c, d_d, grid, block, volta);
-//   // for (int i = 0; i < 16; i++) {
-//   //   for (int j = 0; j < 16; j++) {
-//   //     printf("%f ", d_c[i * 16 + j]);
-//   //   }
-//   //   printf("\n");
-//   // }
-//   // unsigned a = 0x3f800000;
-//   // unsigned b = 0x10000001;
-//   // uint64_t c = concat(a, b);
-//   // printf("%x\n%x\n%lx\n", a, b, c);
-//   // printf("%x\n%x\n", (uint64_t)a, (uint64_t)b);
-
-//   // volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
-//   // volta.SIM_STG_INSTR(1, 64, 0, 0, 0);
-// }
