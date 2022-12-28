@@ -9,8 +9,7 @@ using std::vector;
 
 enum cudaMemcpyKind {
   MemcpyHostToDevice = 0, /**< Host   -> Device */
-  MemcpyDeviceToHost = 1,  /**< Device -> Host */
-  MemcpyDeviceToDevice = 2, /**< Device   -> Device */
+  MemcpyDeviceToHost = 1  /**< Device -> Host */
 };
 
 enum s_reg_t { SRZ = 0, SR_LAINID, SR_TID_X, SR_TID_Y, SR_CTAID_X, SR_CTAID_Y };
@@ -58,6 +57,8 @@ class GPU {
                      unsigned imm, unsigned Sc = 255,unsigned Pd0 = 7, unsigned Ps0 = 7);
   void SIM_EXIT_INSTR();
   unsigned *memory_;
+  // size_t allocated_size_;
+  // size_t memory_size_;
   uint64_t allocated_size_;
   uint64_t memory_size_;
   unsigned total_thread() {return WARP_SIZE_;}
@@ -69,6 +70,7 @@ class GPU {
   const unsigned WARP_SIZE_ = 32;
 };
 uint64_t concat(unsigned high, unsigned low);
+void split(uint64_t data, unsigned &high, unsigned &low);
 extern void simMalloc(void **ptr, size_t size, GPU &volta);
 
 extern void simMemcpy(void *dst, void *src, size_t count,
@@ -77,5 +79,5 @@ extern void simMemcpy(void *dst, void *src, size_t count,
 extern void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
                         dim3 &blockDim, GPU &volta);
 
-extern void gemm(float *a, float *b, float *c, float *d);
+extern void sim_gemm(float *a, float *b, float *c, float *d, int m, int k, int n, GPU& volta, dim3 & gridDim, dim3 & blockDim);
 #endif

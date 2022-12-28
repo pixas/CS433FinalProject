@@ -6,6 +6,7 @@
 #include <iomanip>
 
 using namespace std;
+
 void print_hex(uint32_t num) {
   std::cout << "0x" << std::setw(8) << std::setfill('0') << std::hex << num << std::endl;
 }
@@ -944,8 +945,7 @@ void simMemcpy(void *dst, void *src, size_t count, enum cudaMemcpyKind kind,
   // Check that the destination and source pointers are within the bounds of the GPU memory
   if (
     (kind == MemcpyHostToDevice && check_in_GPU(dst, count, volta)) ||
-    (kind == MemcpyDeviceToHost && check_in_GPU(src, count, volta)) ||
-    (kind == MemcpyDeviceToDevice && check_in_GPU(dst, count, volta) && check_in_GPU(src, count, volta))
+    (kind == MemcpyDeviceToHost && check_in_GPU(src, count, volta))
   ) {
     // Copy memory between the host and the GPU
     memcpy(dst, src, count);
@@ -1073,9 +1073,6 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
   volta.SIM_HMMA_INSTR_STEP3(10, 14, 2, 10);
   volta.SIM_LEA_INSTR(true, true, 13, 22, 101, 0x2, 23, 7, 0);
 
-
-  // load 12 and 13 value to another register for calculation
-
   volta.SIM_STG_INSTR(true, 64, 4, 12, 0);
   volta.SIM_STG_INSTR(true, 64, 6, 12, 0x80);
   volta.SIM_STG_INSTR(true, 64, 8, 12, 0x10);
@@ -1111,7 +1108,7 @@ void wmma_kernel(__half *a, __half *b, float *c, float *d, dim3 &gridDim,
  *  @param n the col of matric b
  *  @param k the col/row of matric a/b
 */
-void gemm(float *a, float *b, float *c, float *d, int m, int k, int n, GPU& volta, dim3 & gridDim, dim3 & blockDim) {
+void sim_gemm(float *a, float *b, float *c, float *d, int m, int k, int n, GPU& volta, dim3 & gridDim, dim3 & blockDim) {
   // host function gemm
   // mxnxk=? According to the pytorch source code, find the matrix size of the
   // conv2d operator of Resnet18 when doing matrix multiplication after
@@ -1231,88 +1228,76 @@ void im2col() {
 }
 void conv() {}
 
-// int main() {
-// //   float a_list[16] = {pow(2, -20), 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5};
-// //   float b_list[16] = {0, -0.1, 0.2, -0.3, 0.4, -0.5, 0.6, 0.7, 0.8, -0.9, 1, 1.1, 1.2, -1.3, 1.4, 1.5};
-// //   float c_list[16];
+int main() {
+//   float a_list[16] = {pow(2, -20), 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.1, 1.2, 1.3, 1.4, 1.5};
+//   float b_list[16] = {0, -0.1, 0.2, -0.3, 0.4, -0.5, 0.6, 0.7, 0.8, -0.9, 1, 1.1, 1.2, -1.3, 1.4, 1.5};
+//   float c_list[16];
 
-// //   __half ha_list[16], hb_list[16];
+//   __half ha_list[16], hb_list[16];
 
-// //   for (int i = 0; i < 16; i++) {
-// //     ha_list[i] = __float2half(a_list[i]);
-// //     hb_list[i] = __float2half(b_list[i]);
-// //     std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
-// //   }
-
-// //   for (int i = 0; i < 16; i++) {
-// //     c_list[i] = a_list[i] * b_list[i];
-// //     float hc = ha_list[i] * hb_list[i];
-// //     printf("%f %f %f %f\n", c_list[i], hc, c_list[i] - hc, __half2float(__float2half(c_list[i])));
-// //   }
-//   int single_size = 21;
-//   int size = single_size * single_size;
-//   vector<float> a(size), b(size);
-//   vector<float> c(size, 0);
-//   for (int i = 0; i < single_size; i++) {
-//     for (int j = 0; j < single_size; j++) {
-//       a[i * single_size + j] = i + j;
-//       b[i * single_size + j] = -i - j;
-//     }
+//   for (int i = 0; i < 16; i++) {
+//     ha_list[i] = __float2half(a_list[i]);
+//     hb_list[i] = __float2half(b_list[i]);
+//     std::cout << a_list[i] << " " << __half2float(ha_list[i]) << std::endl;
 //   }
-//   // for (int i = 0; i < 20; ++i) {
-//   //   for (int j = 0; j < 20; ++j) {
-//   //     printf("%.2f ", (a[i * 20 + j]));
-//   //   }
-//   //   printf("\n");
-//   // }
 
-//   float *d_a, *d_b;
-//   float* d_c;
-//   float * d_d;
-//   GPU volta;
-//   simMalloc((void**)(&d_a), sizeof(float) * size, volta);
-//   simMalloc((void**)(&d_b), sizeof(float) * size, volta);
-//   simMalloc((void**)(&d_c), sizeof(float) * size, volta);
-//   simMalloc((void**)(&d_d), sizeof(float) * size, volta);
-//   simMemcpy(d_a, a.data(), sizeof(float) * size, MemcpyHostToDevice, volta);
-//   simMemcpy(d_b, b.data(), sizeof(float) * size, MemcpyHostToDevice, volta);
-//   dim3 grid = {1, 1, 1};
-//   dim3 block = {1, 1, 1};
-//   // wmma_kernel(d_a, d_b, d_c, d_d, grid, block, volta);
-//   gemm(d_a, d_b, d_c, d_d, single_size, single_size, single_size, volta, grid, block);
-//   simMemcpy(c.data(), d_c, sizeof(float) * size, MemcpyDeviceToHost, volta);
+//   for (int i = 0; i < 16; i++) {
+//     c_list[i] = a_list[i] * b_list[i];
+//     float hc = ha_list[i] * hb_list[i];
+//     printf("%f %f %f %f\n", c_list[i], hc, c_list[i] - hc, __half2float(__float2half(c_list[i])));
+//   }
+  int single_size = 112;
+  int size = single_size * single_size;
+  vector<float> a(size), b(size);
+  vector<float> c(size);
+  for (int i = 0; i < single_size; i++) {
+    for (int j = 0; j < single_size; j++) {
+      a[i * single_size + j] = ((float)i) / 200 - ((float)j) / 200;
+      b[i * single_size + j] = float(-i) / 200 + float(j) / 200;
+    }
+  }
 
-//   for (int i = 0; i < single_size; i++) {
-//     for (int j = 0; j < single_size; j++) {
-//       printf("%.3f ", c[i * single_size + j]);
-//     }
-//     printf("\n");
-//   }
-//   printf("\n");
-//   c.clear();
-//   c.resize(size, 0);
-//   for (int i = 0; i < single_size; ++i) {
-//     for (int j = 0; j < single_size; ++j) {
-//       for (int k = 0; k < single_size; ++k) {
-//         c[i * single_size + j] += a[i * single_size + k] * b[k * single_size + j];
-//       }
-//       // printf("%.3f ", c[i * single_size + j]);
-//     }
-//     // printf("\n");
-//   }
-//   for (int i = 0; i < single_size; ++i) {
-//     for (int j = 0; j < single_size; ++j) {
-//       printf("%.3f ", c[i * single_size + j]);
-//     }
-//     printf("\n");
-//   }
-  
-//   // unsigned a = 0x3f800000;
-//   // unsigned b = 0x10000001;
-//   // uint64_t c = concat(a, b);
-//   // printf("%x\n%x\n%lx\n", a, b, c);
-//   // printf("%x\n%x\n", (uint64_t)a, (uint64_t)b);
+  float *d_a, *d_b;
+  float* d_c;
+  float * d_d;
+  GPU volta;
+  simMalloc((void**)(&d_a), sizeof(float) * size, volta);
+  simMalloc((void**)(&d_b), sizeof(float) * size, volta);
+  simMalloc((void**)(&d_c), sizeof(float) * size, volta);
+  simMalloc((void**)(&d_d), sizeof(float) * size, volta);
+  simMemcpy(d_a, a.data(), sizeof(float) * size, MemcpyHostToDevice, volta);
+  simMemcpy(d_b, b.data(), sizeof(float) * size, MemcpyHostToDevice, volta);
+  dim3 grid = {1, 1, 1};
+  dim3 block = {1, 1, 1};
+  // wmma_kernel(d_a, d_b, d_c, d_d, grid, block, volta);
+  sim_gemm(d_a, d_b, d_c, d_d, single_size, single_size, single_size, volta, grid, block);
+  for (int i = 0; i < single_size; i++) {
+    for (int j = 0; j < single_size; j++) {
+      printf("%f ", d_c[i * single_size + j]);
+    }
+    printf("\n");
+  }
+  bool correct = true;
+  for (int i = 0; i < single_size; i++) {
+    for (int j = 0; j < single_size; j++) {
+      for (int k = 0; k < single_size; ++k) {
+        c[i * single_size + j] += a[i * single_size + k] * b[k * single_size + j];
+      }
+      if (abs(c[i * single_size + j] - d_c[i * single_size + j]) > 0.01) {
+        printf("Wrong calculated: %.3f and %.3f\n", c[i * single_size + j], d_c[i * single_size + j]);
+        exit(0);
+      }
+      // printf("%f ", c[i * single_size + j]);
+    }
+    printf("\n");
+  }
+  printf("Correct calculated!\n");
+  // unsigned a = 0x3f800000;
+  // unsigned b = 0x10000001;
+  // uint64_t c = concat(a, b);
+  // printf("%x\n%x\n%lx\n", a, b, c);
+  // printf("%x\n%x\n", (uint64_t)a, (uint64_t)b);
 
-//   // volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
-//   // volta.SIM_STG_INSTR(1, 64, 0, 0, 0);
-// }
+  // volta.SIM_LDG_INSTR(1, 64, 0, 0, 0);
+  // volta.SIM_STG_INSTR(1, 64, 0, 0, 0);
+}
