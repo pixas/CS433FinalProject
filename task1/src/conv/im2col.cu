@@ -54,7 +54,8 @@ __global__ void im2col_gpu_kernel(
                 int h_im = h_offset + i * dilation_h;   // height index of the pixel in img in pixel units
                 int w_im = w_offset + j * dilation_w;   // width index of the pixel in img in pixel units
 
-                *data_col_ptr = (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width) ? data_im_ptr[i * dilation_h * width + j * dilation_w] : __float2half(0);   // check if the index is valid
+                *data_col_ptr = (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width) ? \
+                data_im_ptr[i * dilation_h * width + j * dilation_w] : __float2half(0);   // check if the index is valid
                 data_col_ptr += height_col * width_col; // move to the next pixel in col
             }
         }

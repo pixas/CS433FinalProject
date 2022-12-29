@@ -54,10 +54,6 @@ std::unordered_map<String, std::unordered_map<String, float *>> obtain_layer_inf
             memcpy(temp, layer_blobs[j].data, total_size * sizeof(float));
 
             params[layer->name][j == 0 ? "weight" : "bias"] = temp;
-            // for (int k = 0; k < param_size.dims(); ++k) {
-            //     size_string += std::to_string(param_size[k]) + ",";
-            // }
-            // printf("\tLayer %d's param %d's dims %d and size (%s) \n", id, j, param_size.dims(), size_string.c_str());
         }
     }
     return params;

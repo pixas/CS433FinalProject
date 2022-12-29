@@ -105,7 +105,6 @@ public:
 
         simVolta::dim3 simDimGrid, simDimBlock;
         for (int b = 0; b < bsz; ++b) {
-            // cudaMemcpy(sim_aligned_matrix_c, aligned_batch_matrix_c + b * aligned_m * aligned_n, sizeof(float) * aligned_m * aligned_n, cudaMemcpyDeviceToHost);
             cudaMemcpy(sim_aligned_matrix_b, float_aligned_batch_matrix_b + b * aligned_k * aligned_n, sizeof(float) * aligned_k * aligned_n, cudaMemcpyDeviceToHost);      
             //  call the gemm function
             simVolta::sim_gemm(sim_aligned_matrix_a, sim_aligned_matrix_b, sim_aligned_matrix_c, sim_aligned_matrix_d, aligned_m, aligned_k, aligned_n, volta, simDimGrid, simDimBlock);
