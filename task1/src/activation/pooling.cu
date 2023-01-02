@@ -21,16 +21,11 @@
  */
 template<typename T>
 __global__ void max_pool_2d_kernel(T *input, T *output, int channels, int height, int width, int kernel_h, int kernel_w, int padding, int stride) {
-    // int batch_size = gridDim.z;
     int batch_idx = blockIdx.z;
 
     int target_height = (height + 2 * padding - 1) / stride;
     int target_width = (width + 2 * padding - 1) / stride;
-    // int block_idx = gridDim.x * gridDim.y * blockIdx.z + gridDim.x * blockIdx.y + blockIdx.x;
-    // int thread_idx = threadIdx.y * blockDim.x + threadIdx.x;
-    // int current_id = thread_idx + block_idx * blockDim.x * blockDim.y;
 
-    // int n_points = height * width;
     int row = blockIdx.y * blockDim.y + threadIdx.y;
     int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -48,20 +43,16 @@ __global__ void max_pool_2d_kernel(T *input, T *output, int channels, int height
             for (int h = hstart; h < hend; ++h) {
                 for (int w = wstart; w < wend; ++w) {
                     int final_idx = cur_idx + h * width + w;
-                    // printf("%d %d %d %d\n", (final_idx / (channels * height * width)), (final_idx % (channels * height * width) / (height * width)), ((final_idx % (channels * height * width) % (height * width)) / width), ((final_idx % (channels * height * width) % (height * width)) % width));
                     if (input[final_idx] > max_value) {
                         max_idx = final_idx;
                         max_value = input[max_idx];
                     }
                 }
             }
-            // printf("%d %d %d %d %.1f\n", batch_idx, dim, row, col, max_value);
             int cur_index = batch_idx * channels * target_height * target_width + dim * target_height * target_width + row * target_width + col;
             output[cur_index] = max_value;
-            // printf("%.2f\n", output[cur_index]);
         }
     }
-
 }
 
 
@@ -150,9 +141,6 @@ void adaptive_mean_pool(T *input, T *output, int batch_size, int channels, int h
     dim3 grid((width + block.x - 1) / block.x, (height + block.y - 1) / block.y, batch_size);
 
     adaptive_pool_sum_kernel<<<grid, block>>>(input, output, channels, height, width);
-    // dim3 grid2(1, 1);
-    // dim3 block2(channels, batch_size);
-    // printf("%.3f\n", output[0]);
     dim3 block2, grid2;
     if (batch_size * channels > CUDA_NUM_THREADS) {
         block2.x = CUDA_NUM_THREADS;
