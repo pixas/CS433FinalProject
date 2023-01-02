@@ -72,7 +72,7 @@ float __half2float(const __half &a) {
     }
     // exponent = - 14 - (11 - highest_bit) + 127;
     exponent = 102 + highest_bit;
-    mantissa = (1 << (126 - exponent)) * mantissa - (1 << 23);
+    mantissa = ((1 << (126 - exponent)) * mantissa - (1 << 23)) & 0x7fffff;
     // mantissa = ((1 << (exponent - 103)) + (mantissa >> (126 - exponent))) & 0x7fffff;
   } else if (exponent == 0x1f) {
     // Inf or NaN
