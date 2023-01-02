@@ -1040,7 +1040,6 @@ void sim_gemm(float *a, float *b, float *c, float *d, int m, int k, int n, GPU& 
       for (int block_i = true_i; block_i < true_i + 16; ++block_i) {
         for (int block_j = true_j; block_j < true_j + 16; ++block_j) {
           if (block_i < m && block_j < k) {
-            // printf("%d %d\n", block_i, block_j);
             padded_a[i * common_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(a[block_i * k + block_j]);
           } else {
             padded_a[i * common_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(0.0);
@@ -1058,7 +1057,6 @@ void sim_gemm(float *a, float *b, float *c, float *d, int m, int k, int n, GPU& 
       for (int block_i = true_i; block_i < true_i + 16; ++block_i) {
         for (int block_j = true_j; block_j < true_j + 16; ++block_j) {
           if (block_i < k && block_j < n) {
-            // printf("%d %d\n", block_i, block_j);
             padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(b[block_i * n + block_j]);
           } else {
             padded_b[i * b_col_blocks * 16 * 16 + j * 16 * 16 + (block_i - true_i) * 16 + (block_j - true_j)] = __float2half(0.0);
